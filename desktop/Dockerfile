@@ -47,18 +47,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Node.js 22 LTS (via NodeSource)
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
-       > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm \
-    && rm -rf /var/lib/apt/lists/*
+# 2. Node.js 22 LTS (reuse base image Node/NodeSource repo if already configured)
+RUN if ! command -v node >/dev/null 2>&1; then \
+      if [ ! -f /usr/share/keyrings/nodesource.gpg ] && [ ! -f /etc/apt/keyrings/nodesource.gpg ]; then \
+        mkdir -p /usr/share/keyrings \
+        && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+           | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+        && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+           > /etc/apt/sources.list.d/nodesource.list; \
+      fi \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends nodejs \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && npm install -g pnpm
 
-# 3. Google Chrome (amd64) or Chromium fallback (arm64 / Apple Silicon local dev)
+# 3. Google Chrome (amd64) or preinstalled/fallback browser (arm64 / Apple Silicon local dev)
 RUN ARCH="$(dpkg --print-architecture)" \
     && if [ "$ARCH" = "amd64" ]; then \
          wget -qO /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
@@ -66,9 +70,9 @@ RUN ARCH="$(dpkg --print-architecture)" \
          && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \
          && rm -f /tmp/google-chrome.deb \
          && rm -rf /var/lib/apt/lists/*; \
-       else \
+       elif ! command -v chromium >/dev/null 2>&1 && ! command -v firefox >/dev/null 2>&1; then \
          apt-get update \
-         && apt-get install -y --no-install-recommends chromium-browser || apt-get install -y --no-install-recommends chromium \
+         && (apt-get install -y --no-install-recommends chromium || apt-get install -y --no-install-recommends firefox || true) \
          && rm -rf /var/lib/apt/lists/*; \
        fi
 
@@ -80,10 +84,14 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
 RUN printf '#!/bin/sh\n\
 if command -v google-chrome-stable >/dev/null 2>&1; then\n\
   exec google-chrome-stable --no-sandbox --disable-dev-shm-usage "$@"\n\
+elif command -v chromium >/dev/null 2>&1; then\n\
+  exec chromium --no-sandbox --disable-dev-shm-usage "$@"\n\
 elif command -v chromium-browser >/dev/null 2>&1; then\n\
   exec chromium-browser --no-sandbox --disable-dev-shm-usage "$@"\n\
+elif command -v firefox >/dev/null 2>&1; then\n\
+  exec firefox "$@"\n\
 else\n\
-  exec chromium --no-sandbox --disable-dev-shm-usage "$@"\n\
+  exec xdg-open "$@"\n\
 fi\n' > /usr/local/bin/super-agent-browser \
     && chmod +x /usr/local/bin/super-agent-browser
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -249,6 +250,8 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 	if m.cfg.WorkspaceHostDir != "" {
 		workspaceBind = fmt.Sprintf("%s/%s:/workspace", m.cfg.WorkspaceHostDir, safeUser)
 	}
+	log.Printf("[docker] creating container=%s user=%s image=%s workspace=%s mem=%dMB cpus=%.1f",
+		name, username, m.cfg.DesktopImage, workspaceBind, m.cfg.DesktopMemoryMB, m.cfg.DesktopCPUs)
 
 	req := CreateContainerRequest{
 		Image: m.cfg.DesktopImage,

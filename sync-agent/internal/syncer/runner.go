@@ -72,6 +72,8 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 			return nil
 		}
 		log.Printf("[sync] initial pass error: %v", err)
+	} else {
+		log.Println("[sync] initial sync check complete — watching for changes...")
 	}
 
 	syncTicker := time.NewTicker(opts.Interval)
@@ -91,6 +93,8 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 					return nil
 				}
 				log.Printf("[lock] heartbeat warning: %v", err)
+			} else {
+				log.Printf("[lock] heartbeat ok (device=%s)", identity.DeviceName)
 			}
 		case <-syncTicker.C:
 			if err := runSyncPass(ctx, engine); err != nil {

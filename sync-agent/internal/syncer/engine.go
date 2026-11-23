@@ -224,6 +224,7 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 				delete(e.baseline, rel)
 				delete(e.hashCache, rel)
 				stats.Deleted++
+				log.Printf("[sync] 🗑 deleted locally %s (removed on cloud)", rel)
 			} else {
 				// Created or modified locally -> push to cloud
 				entry, err := e.pushFile(ctx, rel, loc)
@@ -242,6 +243,7 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 				}
 				delete(e.baseline, rel)
 				stats.Deleted++
+				log.Printf("[sync] 🗑 deleted on cloud %s (removed locally)", rel)
 			} else {
 				// Created or modified on cloud -> pull locally
 				if err := e.pullFile(ctx, rel); err != nil {

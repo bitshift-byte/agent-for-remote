@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -52,16 +53,20 @@ func (s *Server) handleSyncLockAcquire(w http.ResponseWriter, r *http.Request, u
 	res, holder, err := s.syncSvc.Locks().Acquire(username, req)
 	if err != nil {
 		if errors.Is(err, syncsvc.ErrLockConflict) {
+			log.Printf("[sync/lock] CONFLICT user=%s requester=%s(%s) holder=%s", username, req.DeviceName, req.DeviceID, holder.DeviceName)
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error":     err.Error(),
 				"locked_by": holder,
 			})
 			return
 		}
+		log.Printf("[sync/lock] acquire error user=%s err=%v", username, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
+	log.Printf("[sync/lock] ACQUIRED user=%s device=%s(%s) os=%s epoch=%d taken_over=%v prev=%s",
+		username, res.Lock.DeviceName, res.Lock.DeviceID, res.Lock.OS, res.Lock.Epoch, res.TakenOver, res.PreviousDev)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -87,6 +92,7 @@ func (s *Server) handleSyncLockHeartbeat(w http.ResponseWriter, r *http.Request,
 		if errors.Is(err, syncsvc.ErrLockInvalid) {
 			code = http.StatusPreconditionFailed
 		}
+		log.Printf("[sync/lock] HEARTBEAT REJECTED user=%s device=%s err=%v", username, req.DeviceID, err)
 		writeJSON(w, code, map[string]any{
 			"error":     err.Error(),
 			"locked_by": s.syncSvc.Locks().Get(username),
@@ -107,6 +113,7 @@ func (s *Server) handleSyncLockRelease(w http.ResponseWriter, r *http.Request, u
 		return
 	}
 	released := s.syncSvc.Locks().Release(username, req.DeviceID, req.LeaseToken)
+	log.Printf("[sync/lock] RELEASE user=%s device=%s released=%v", username, req.DeviceID, released)
 	writeJSON(w, http.StatusOK, map[string]bool{"released": released})
 }
 
@@ -117,6 +124,7 @@ func (s *Server) handleSyncManifest(w http.ResponseWriter, r *http.Request, user
 	}
 	manifest, err := s.syncSvc.BuildManifest(username)
 	if err != nil {
+		log.Printf("[sync/manifest] error user=%s err=%v", username, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -138,11 +146,13 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
 				return
 			}
+			log.Printf("[sync/file] GET error user=%s path=%s err=%v", username, relPath, err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		defer f.Close()
 
+		log.Printf("[sync/file] ↓ GET user=%s path=%s size=%d", username, entry.Path, entry.Size)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("X-File-SHA256", entry.SHA256)
 		w.Header().Set("X-File-ModTime", strconv.FormatInt(entry.ModTimeNano, 10))
@@ -166,9 +176,11 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 
 		entry, err := s.syncSvc.WriteFile(username, relPath, r.Body, modTimeNano, perm)
 		if err != nil {
+			log.Printf("[sync/file] PUT error user=%s path=%s err=%v", username, relPath, err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		log.Printf("[sync/file] ↑ PUT user=%s device=%s path=%s size=%d", username, r.Header.Get("X-Device-ID"), entry.Path, entry.Size)
 		writeJSON(w, http.StatusOK, entry)
 
 	case http.MethodDelete:
@@ -176,9 +188,11 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 			return
 		}
 		if err := s.syncSvc.DeleteFile(username, relPath); err != nil {
+			log.Printf("[sync/file] DELETE error user=%s path=%s err=%v", username, relPath, err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		log.Printf("[sync/file] 🗑 DELETE user=%s device=%s path=%s", username, r.Header.Get("X-Device-ID"), relPath)
 		writeJSON(w, http.StatusOK, map[string]string{"deleted": relPath})
 
 	default:

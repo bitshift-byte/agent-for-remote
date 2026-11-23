@@ -67,14 +67,31 @@ fn main() {
         .setup(|app| {
             // Spawn bundled Go sync-agent sidecar in local control API mode (non-fatal if already running)
             match app.shell().sidecar("sync-agent") {
-                Ok(cmd) => match cmd.args(["-serve", "-addr", "127.0.0.1:17890"]).spawn() {
-                    Ok((_rx, child)) => {
+                Ok(cmd) => match cmd.args(["-serve", "-addr", "localhost:17890"]).spawn() {
+                    Ok((mut rx, child)) => {
                         if let Some(state) = app.try_state::<SidecarState>() {
                             if let Ok(mut guard) = state.0.lock() {
                                 *guard = Some(child);
                             }
                         }
-                        eprintln!("[tray] sync-agent sidecar started on 127.0.0.1:17890");
+                        tauri::async_runtime::spawn(async move {
+                            use tauri_plugin_shell::process::CommandEvent;
+                            while let Some(ev) = rx.recv().await {
+                                match ev {
+                                    CommandEvent::Stdout(line) => {
+                                        eprintln!("[sync-agent] {}", String::from_utf8_lossy(&line).trim_end());
+                                    }
+                                    CommandEvent::Stderr(line) => {
+                                        eprintln!("[sync-agent] {}", String::from_utf8_lossy(&line).trim_end());
+                                    }
+                                    CommandEvent::Terminated(payload) => {
+                                        eprintln!("[sync-agent] exited: {:?}", payload);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
+                        eprintln!("[tray] sync-agent sidecar started on loopback:17890");
                     }
                     Err(e) => eprintln!("[tray] failed to spawn sync-agent sidecar: {e}"),
                 },

@@ -58,7 +58,7 @@ Version=1.0
 Type=Application
 Name=Claude Code (CLI)
 Comment=Launch Claude Code CLI in /workspace (Local Exec Bridge enabled)
-Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh claude; exec bash'"
+Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh claude; exec bash'"
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;
@@ -70,7 +70,7 @@ Version=1.0
 Type=Application
 Name=OpenAI Codex (CLI)
 Comment=Launch OpenAI Codex CLI in /workspace (Local Exec Bridge enabled)
-Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh codex; exec bash'"
+Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh codex; exec bash'"
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;
@@ -82,7 +82,7 @@ Version=1.0
 Type=Application
 Name=Workspace Terminal
 Comment=Open terminal in /workspace
-Exec=xfce4-terminal --working-directory=/workspace
+Exec=xfce4-terminal --maximize --working-directory=/workspace
 Icon=utilities-terminal
 Terminal=false
 Categories=System;TerminalEmulator;
@@ -103,13 +103,13 @@ EOF
 # Remove legacy shortcuts if present from older builds
 rm -f "${DESKTOP_DIR}/Cursor.desktop" "${DESKTOP_DIR}/VS-Code.desktop"
 
-# Apply modern v2 XFCE theme, HiDPI defaults, top bar + centered auto-hide dock, and GTK3 polish
-if [ ! -f "${USER_HOME}/.sa-theme-v2" ]; then
-  INIT_DPI="${DESKTOP_DPI:-115}"
+# Apply modern v3 XFCE theme, 1:1 viewport-safe DPI default (96), smart window placement, top bar + dock, and GTK3 polish
+if [ ! -f "${USER_HOME}/.sa-theme-v3" ]; then
+  INIT_DPI="${DESKTOP_DPI:-96}"
   INIT_UI_FONT="${DESKTOP_FONT_SIZE:-11}"
-  INIT_ICON_FONT="${DESKTOP_ICON_FONT_SIZE:-11.5}"
+  INIT_ICON_FONT="${DESKTOP_ICON_FONT_SIZE:-11}"
   INIT_TERM_FONT="${DESKTOP_TERM_FONT_SIZE:-12}"
-  INIT_ICON_SIZE="${DESKTOP_ICON_SIZE:-56}"
+  INIT_ICON_SIZE="${DESKTOP_ICON_SIZE:-52}"
   INIT_THEME="${DESKTOP_THEME:-dark}"
 
   GTK_THEME="Arc-Dark"
@@ -167,6 +167,12 @@ EOF
     <property name="show_frame_shadow" type="bool" value="true"/>
     <property name="show_popup_shadow" type="bool" value="true"/>
     <property name="button_layout" type="string" value="CHM|O"/>
+    <property name="placement_mode" type="string" value="center"/>
+    <property name="placement_ratio" type="int" value="20"/>
+    <property name="snap_to_border" type="bool" value="true"/>
+    <property name="snap_to_windows" type="bool" value="true"/>
+    <property name="tile_on_move" type="bool" value="true"/>
+    <property name="wrap_workspaces" type="bool" value="false"/>
   </property>
 </channel>
 EOF
@@ -393,7 +399,7 @@ MiscBordersDefault=FALSE
 ScrollingLines=10000
 EOF
 
-  touch "${USER_HOME}/.sa-theme-v2"
+  touch "${USER_HOME}/.sa-theme-v3"
 fi
 
 # Autostart fcitx5 Chinese IME when XFCE starts
@@ -469,4 +475,4 @@ EOF
 fi
 
 chmod +x "${DESKTOP_DIR}"/*.desktop
-chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${CLAUDE_DIR}" "${CODEX_DIR}" "${USER_HOME}/.sa-theme-v2" || true
+chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${CLAUDE_DIR}" "${CODEX_DIR}" "${USER_HOME}/.sa-theme-v3" || true

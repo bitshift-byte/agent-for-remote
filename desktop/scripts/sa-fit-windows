@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Maximize all normal application windows so none overflow outside the Selkies viewport.
+set -euo pipefail
+
+if ! command -v wmctrl >/dev/null 2>&1; then
+  echo "wmctrl is not installed." >&2
+  exit 1
+fi
+
+wmctrl -l | while read -r wid desk _host _title; do
+  # Skip sticky desktop/panel windows (desktop == -1)
+  if [ "${desk}" = "-1" ]; then
+    continue
+  fi
+  wmctrl -i -r "${wid}" -b add,maximized_vert,maximized_horz || true
+done

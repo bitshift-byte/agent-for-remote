@@ -87,14 +87,14 @@ RUN ARCH="$(dpkg --print-architecture)" \
 RUN npm install -g @anthropic-ai/claude-code @openai/codex \
     && npm cache clean --force
 
-# 5. Browser wrapper for non-privileged Docker sandbox (avoids --privileged)
+# 5. Browser wrapper for non-privileged Docker sandbox (avoids --privileged, starts maximized to fit viewport)
 RUN printf '#!/bin/sh\n\
 if command -v google-chrome-stable >/dev/null 2>&1; then\n\
-  exec google-chrome-stable --no-sandbox --disable-dev-shm-usage "$@"\n\
+  exec google-chrome-stable --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
 elif command -v chromium >/dev/null 2>&1; then\n\
-  exec chromium --no-sandbox --disable-dev-shm-usage "$@"\n\
+  exec chromium --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
 elif command -v chromium-browser >/dev/null 2>&1; then\n\
-  exec chromium-browser --no-sandbox --disable-dev-shm-usage "$@"\n\
+  exec chromium-browser --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
 elif command -v firefox >/dev/null 2>&1; then\n\
   exec firefox "$@"\n\
 else\n\
@@ -114,6 +114,7 @@ RUN apt-get update \
        fonts-jetbrains-mono \
        fonts-noto-color-emoji \
        xfce4-whiskermenu-plugin \
+       wmctrl \
        zenity \
     && if [ -n "${CLAUDE_DESKTOP_DEB_URL}" ]; then \
          wget -qO /tmp/claude-desktop.deb "${CLAUDE_DESKTOP_DEB_URL}" \
@@ -136,6 +137,7 @@ RUN mkdir -p /workspace /custom-cont-init.d
 COPY scripts/sa-local-sh /usr/local/bin/sa-local-sh
 COPY scripts/sa-claude-hook /usr/local/bin/sa-claude-hook
 COPY scripts/sa-preview /usr/local/bin/sa-preview
+COPY scripts/sa-fit-windows /usr/local/bin/sa-fit-windows
 COPY scripts/sa-display /usr/local/bin/sa-display
 COPY scripts/super-agent-chatgpt /usr/local/bin/super-agent-chatgpt
 COPY scripts/super-agent-claude-desktop /usr/local/bin/super-agent-claude-desktop
@@ -144,6 +146,7 @@ RUN chmod +x \
     /usr/local/bin/sa-local-sh \
     /usr/local/bin/sa-claude-hook \
     /usr/local/bin/sa-preview \
+    /usr/local/bin/sa-fit-windows \
     /usr/local/bin/sa-display \
     /usr/local/bin/super-agent-chatgpt \
     /usr/local/bin/super-agent-claude-desktop \

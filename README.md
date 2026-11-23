@@ -1,107 +1,67 @@
-# Super-Agent — Phase 1 MVP (GUI 云桌面)
+# Super-Agent
 
-基于 V2.0 双模架构的 **Phase 1 MVP** 实现：在海外云服务器上部署定制 Ubuntu XFCE + KasmVNC 桌面镜像与 Go 控制面/反向代理网关，用户无需安装任何本地客户端，打开浏览器登录即可进入独立隔离的云端桌面，直接使用 **Claude Code**、**OpenAI Codex**、**Chrome** 与 **中文输入法（fcitx5）**。
+**海外云端 Ubuntu 桌面 + 本地双向实时同步 + 透明本机执行 + 跨平台托盘伴侣** 的一站式 AI 工作区。
+
+> 完整部署步骤、架构细节与常见问题排查请参见 [docs/GUIDE.md](./docs/GUIDE.md)。
+
+## 核心特性
+
+- **美化云端 Ubuntu 桌面**：基于 [LinuxServer.io Webtop (`ubuntu-xfce`)](https://docs.linuxserver.io/images/docker-webtop/)，预置 `Arc-Dark` 深色主题、`Papirus-Dark` 图标、`JetBrains Mono` 字体、深海渐变壁纸与 fcitx5 中文输入法，内置 Chrome/Chromium、[Claude Code CLI](https://claudecodeguide.dev/docs/foundations/installation)、[OpenAI Codex CLI](https://docs.nexlev.io/docs/mcp/quickstart)，并支持预装 [ChatGPT 官方 Linux 桌面端](https://learn.chatgpt.com/docs/linux/linux-app) 与 [Claude 官方 Linux 桌面端](https://code.claude.com/docs/en/desktop-linux)（含 GNOME Keyring 登录态持久化）。
+- **跨机器双向实时同步 + 单活设备锁**：本机代码仓库与云端 `/workspace` 毫秒级三向差分双向同步（支持普通文件与空文件夹），内置忽略 `node_modules`、`.venv`、`target`、`.git` 等目录并支持 `.syncignore`；同步元数据保存在系统用户配置目录，保持项目仓库彻底干净。
+- **云端高速盘 + 命令前后强同步栅栏（透明本机执行）**：云端 AI 的文件检索与编辑直接走云端本地盘，而通过 `sa-local-sh` 转发的 Shell 命令会在你本机当前仓库目录真实执行（Pre-Sync 栅栏 → 本机安全护栏执行 → Post-Sync 栅栏）。
+- **6 位一次性配对码免密绑定 + 跨平台托盘伴侣**：基于 Tauri 2.0 的 macOS 顶部菜单栏 / Windows 系统托盘客户端，在网页控制台生成 6 位配对码粘贴到托盘即可完成绑定，下发可随时在网页一键解绑吊销的独立设备凭证（`dev_...`），本机不保存主密码。
 
 ## 目录结构
 
 ```text
 super-agent/
-├── .env.example                       # 环境变量模板（JWT 密钥、账号、容器配额、API Key）
-├── desktop/
-│   ├── Dockerfile                     # 定制 Ubuntu XFCE + KasmVNC + Node 22 + Python 3 + Chrome + fcitx5 + Claude Code + Codex
-│   └── scripts/
-│       └── init-workspace.sh          # s6 启动脚本：初始化 /workspace、fcitx5 自启与桌面快捷方式
-└── gateway/
-    ├── Dockerfile                     # Go 1.22 多阶段构建（零外部依赖，纯标准库）
-    ├── go.mod
-    ├── cmd/gateway/main.go            # 网关入口与优雅退出
-    └── internal/
-        ├── auth/                      # HS256 JWT 签发与校验（HttpOnly Cookie / Bearer）
-        ├── config/                    # 环境变量配置加载
-        ├── docker/                    # 原生 Docker Engine REST 客户端与单用户容器生命周期管理
-        ├── proxy/                     # KasmVNC HTTP + WebSocket 反向代理
-        └── server/
-            ├── server.go              # API 路由、鉴权中间件与 /desktop/ 代理入口
-            └── web/index.html         # 内嵌极简 Web 登录与云桌面控制台（含唤醒加载过渡）
+├── .env.example                           # 网关与容器配置模板
+├── .github/workflows/release-tray.yml     # GitHub Actions 自动打包 Mac (.dmg) & Windows (.exe/.msi)
+├── docs/GUIDE.md                          # 完整架构、构建、部署与排查手册
+├── desktop/                               # 云端 Ubuntu 桌面镜像、主题美化脚本与 AI 启动器
+├── gateway/                               # Go 1.22 纯标准库网关（鉴权、容器编排、同步服务、命令调度、配对码与 Web 门户）
+├── sync-agent/                            # 跨平台本地同步与命令执行守护引擎（macOS / Windows / Linux）
+└── tray-app/                              # Tauri 2.0 跨平台菜单栏 / 系统托盘应用
 ```
 
-## 核心设计要点
+## 快速上手
 
-- **基础云桌面镜像**：基于 [LinuxServer.io Webtop (`lscr.io/linuxserver/webtop:ubuntu-xfce`)](https://docs.linuxserver.io/images/docker-webtop/)，默认内网端口 `3000`，通过 `SUBFOLDER=/desktop/` 原生挂载到网关子路径下，避免复杂的路径重写。
-- **预装 AI CLI 工具**：全局预装 Claude Code（`@anthropic-ai/claude-code`，参见 [Claude Code 安装文档](https://claudecodeguide.dev/docs/foundations/installation)）与 OpenAI Codex CLI（`@openai/codex`，参见 [NexLev Quickstart](https://docs.nexlev.io/docs/mcp/quickstart)），桌面自带一键启动快捷方式。
-- **数据与配置卷分离**：每个用户自动分配两个独立持久化卷，避免冷休眠/重启后登录态丢失，也为 Phase 2 的代码同步做好隔离：
-  - `sa-workspace-<user>` → `/workspace`（项目代码目录）
-  - `sa-config-<user>` → `/config`（浏览器 Cookie、~/.claude、~/.codex、XFCE 与输入法配置）
-- **安全与隔离**：
-  - 网关统一校验 `HttpOnly` JWT Cookie，底层 KasmVNC 端口（`3000`）仅暴露在内部 Docker 网络，不直接暴露公网。
-  - 每个容器通过 cgroups 限制 CPU（默认 2 核）、内存（默认 4GB）与 `/dev/shm`（默认 2GB），不开启 `--privileged`。
-  - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 等密钥通过容器运行时环境变量动态注入，不落盘到 `/workspace`。
-
-## 快速部署（本地或海外 Linux 服务器）
-
-### 1. 准备环境变量
+### 1. 构建并启动服务端（网关 + 云桌面镜像）
 
 ```bash
-cp .env.example .env
-# 务必修改 JWT_SECRET 与 AUTH_USERS
-openssl rand -hex 32
-```
-
-### 2. 构建定制桌面镜像与 Go 网关镜像
-
-```bash
-# 创建共享桥接网络
+cp -n .env.example .env
 docker network create super-agent-net || true
 
-# 1) 构建自定义 Ubuntu + KasmVNC + Claude Code / Codex 桌面镜像（首次构建约 3-6 分钟）
+# 构建美化后的云桌面镜像（如需预装官方 ChatGPT / Claude .deb，详见 docs/GUIDE.md）
 docker build -t super-agent-desktop:latest ./desktop
 
-# 2) 构建 Go 网关镜像（纯标准库，无需外网拉取 Go 依赖）
+# 构建 Go 网关镜像（纯标准库，零外部依赖）
 docker build -t super-agent-gateway:latest ./gateway
 ```
 
-### 3. 启动网关服务
+在 `.env` 中配置 `JWT_SECRET`、`AUTH_USERS` 以及共享工作区目录（`WORKSPACE_DATA_DIR` / `WORKSPACE_HOST_DIR`），然后按 [docs/GUIDE.md](./docs/GUIDE.md) 第 2.3 节启动 `super-agent-gateway` 容器并打开 `http://localhost:8080`。
+
+### 2. 启动本机托盘伴侣并配对绑定
 
 ```bash
-docker run -d \
-  --name super-agent-gateway \
-  --restart unless-stopped \
-  --network super-agent-net \
-  -p 8080:8080 \
-  --env-file .env \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  super-agent-gateway:latest
+cd tray-app
+npm install
+npm run dev     # 开发模式启动（顶部菜单栏出现 SA 图标）
+npm run build   # 打包本机安装程序（macOS .dmg / Windows .exe）
 ```
 
-> 安全建议：生产环境可用 `docker-socket-proxy` 替代直接挂载 Docker socket，并将 `.env` 中的 `DOCKER_HOST` 指向代理地址（如 `tcp://docker-proxy:2375`）。
+1. 浏览器登录云端控制台 → 点击 **「生成 6 位配对码」** → **「一键复制绑定口令」**。
+2. 打开本机 **Super-Agent** 托盘应用 → 粘贴绑定口令 → 点击 **「选择文件夹…」** 选中本地项目目录 → 点击 **「立即绑定并启动同步」**。
+3. 进入云桌面打开终端运行 `sa-local-sh -c "uname -a && pwd"`，确认命令已透明转发至本机仓库执行。
 
-### 4. 访问使用
-
-1. 浏览器打开 `http://<服务器IP>:8080`
-2. 使用 `.env` 中 `AUTH_USERS` 配置的账号登录（默认 `admin` / `admin123`）
-3. 点击 **「启动并进入云桌面」**，等待 10–25 秒容器就绪后自动进入 Ubuntu 桌面
-4. 双击桌面图标即可启动 **Claude Code**、**OpenAI Codex**、**Chrome Browser** 或 **Workspace Terminal**
-5. 中文输入法：按 `Ctrl + Space` 切换 fcitx5 拼音输入法
-
-## 公网 HTTPS 部署建议（Caddy）
-
-在海外服务器上线时，建议在网关前加一层 Caddy 自动签发 TLS 1.3 证书，并将 `.env` 中的 `COOKIE_SECURE` 设为 `true`：
-
-```caddyfile
-desktop.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
-
-## 常用开发与验证命令
+## 测试与发版
 
 ```bash
-# 运行 Go 单元测试（需要本机安装 Go 1.22+）
-cd gateway && go test ./...
+# 运行网关与同步引擎全部单元测试
+(cd gateway && go test -v ./... && go vet ./...)
+(cd sync-agent && go test -v ./... && go vet ./...)
 
-# 查看网关日志
-docker logs -f super-agent-gateway
-
-# 查看已创建的用户桌面容器
-docker ps -a --filter "label=super-agent.managed=true"
+# 推送并打标签以触发 GitHub Actions 自动发布 macOS & Windows 托盘安装包
+git push -u origin main
+git tag v0.1.0 && git push origin v0.1.0
 ```

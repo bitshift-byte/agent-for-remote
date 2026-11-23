@@ -531,6 +531,20 @@
 
       <div id="dash-error" class="error-msg hidden"></div>
 
+      <div id="onboard-card" class="panel hidden" style="grid-column:1 / -1;padding:16px 20px;">
+        <div style="display:flex;align-items:flex-start;gap:14px;">
+          <div style="flex:1;">
+            <div class="panel-title" style="margin-bottom:6px;">开始使用</div>
+            <ol style="margin:0 0 0 18px;font-size:13px;line-height:2;color:var(--text);">
+              <li>点左下「<b>启动并进入云桌面</b>」进入远程 Ubuntu 桌面，文件都在 <code>/workspace</code>，手机浏览器也能用。</li>
+              <li>「<b>本机伴侣</b>」= 你自己电脑上运行的托盘应用，负责文件同步和本地命令执行。它显示「离线」只是同步暂停，<b>云桌面本身不受影响</b>，设备列表里的 chaojin-home-server 就是家里绑定的那台。</li>
+              <li>新电脑要用：安装托盘应用 → 点「<b>生成配对码</b>」→ 把口令粘贴进托盘，即完成绑定。</li>
+            </ol>
+          </div>
+          <button id="onboard-close" class="btn-secondary btn-sm">知道了</button>
+        </div>
+      </div>
+
       <main class="dash-grid">
         <!-- Left: Cloud Workspace Control -->
         <section class="panel">
@@ -569,7 +583,7 @@
 
           <div class="actions-row">
             <button id="btn-launch" class="btn-primary">启动并进入云桌面</button>
-            <button id="btn-stop" class="btn-danger">停止释放</button>
+            <button id="btn-stop" class="btn-danger" title="停止并释放云桌面：断开会话，未保存的工作将丢失">停止释放</button>
           </div>
         </section>
 
@@ -609,20 +623,25 @@
         <span style="color:var(--text-muted);font-size:12px;" id="bar-user"></span>
         <span class="topbar-sep"></span>
         <span id="hud-worker-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">检测本机...</span>
-        <span id="hud-tunnel-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">预览: 离线</span>
+        <span id="hud-tunnel-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">隧道检测中…</span>
       </div>
       <div class="topbar-right">
-        <div class="port-group">
+        <div class="port-group" title="预览云桌面里运行的服务：填入端口（如 npm run dev 的 3000），点「预览」在新标签页打开">
           <span>localhost:</span>
           <input id="hud-preview-port" type="text" placeholder="3000" />
           <button id="bar-preview" type="button">预览</button>
         </div>
-        <button id="bar-newtab" class="btn-secondary btn-sm">新窗口</button>
-        <button id="bar-back" class="btn-secondary btn-sm">控制台</button>
-        <button id="bar-stop" class="btn-danger btn-sm">停止</button>
+        <button id="bar-newtab" class="btn-secondary btn-sm" title="在新标签页打开串流画面">新窗口</button>
+        <button id="bar-back" class="btn-secondary btn-sm" title="返回工作区主页（云桌面保持运行，随时可再进入）">返回主页</button>
+        <button id="bar-stop" class="btn-danger btn-sm" style="margin-left:10px;" title="停止并释放云桌面：断开会话，未保存的工作将丢失">停止</button>
       </div>
     </div>
-    <iframe id="desktop-iframe" class="desktop-frame" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+    <div id="desktop-connecting" style="position:fixed;inset:0;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0d10;">
+      <div class="spinner"></div>
+      <div style="font-weight:500;font-size:14px;color:#e7e9ec;">正在连接云桌面…</div>
+      <div style="font-size:12px;color:#8b929b;">首次连接约需 10 秒，请稍候</div>
+    </div>
+    <iframe id="desktop-iframe" class="desktop-frame" allow="clipboard-read; clipboard-write; fullscreen;"></iframe>
   </div>
 
   <script>
@@ -674,6 +693,7 @@
         $("dash-user").textContent = currentUser;
         $("bar-user").textContent = currentUser;
         showView("dashboard");
+        try { if (!localStorage.getItem("sa-onboarded")) $("onboard-card").classList.remove("hidden"); } catch {}
         await refreshStatus();
       } catch {
         showView("login");
@@ -757,6 +777,8 @@
       }
     }
 
+    let workerMissCount = 0;
+
     async function refreshDesktopHUD() {
       if ($("view-desktop").classList.contains("hidden")) return;
       try {
@@ -766,9 +788,14 @@
         ]);
         const wb = $("hud-worker-badge");
         if (execSt && execSt.worker_online) {
+          workerMissCount = 0;
           const dev = execSt.active_lock ? (execSt.active_lock.device_name || execSt.active_lock.device_id) : "本机";
           wb.className = "status-badge badge-running";
           wb.textContent = `本机在线 · ${dev}`;
+        } else if (++workerMissCount <= 1) {
+          // Transient miss: show reconnecting instead of flapping to offline
+          wb.className = "status-badge badge-starting";
+          wb.textContent = "本机重连中…";
         } else {
           wb.className = "status-badge badge-starting";
           wb.textContent = "本机离线 · 云端小批量";
@@ -776,16 +803,22 @@
         const tb = $("hud-tunnel-badge");
         if (tunSt && tunSt.tunnel_online) {
           tb.className = "status-badge badge-running";
-          tb.textContent = "预览就绪";
+          tb.textContent = "预览隧道就绪";
         } else {
           tb.className = "status-badge badge-stopped";
-          tb.textContent = "预览离线";
+          tb.textContent = "预览隧道离线";
         }
       } catch {}
     }
 
     function openDesktop(url) {
-      $("desktop-iframe").src = url || "/desktop/";
+      const ov = $("desktop-connecting");
+      const frame = $("desktop-iframe");
+      ov.style.display = "flex";
+      frame.onload = () => { ov.style.display = "none"; };
+      // Failsafe: never keep the splash longer than 20s
+      setTimeout(() => { ov.style.display = "none"; }, 20000);
+      frame.src = url || "/desktop/";
       showView("desktop");
       refreshDesktopHUD();
       if (hudTimer) clearInterval(hudTimer);
@@ -830,6 +863,7 @@
         $("dash-user").textContent = currentUser;
         $("bar-user").textContent = currentUser;
         showView("dashboard");
+        try { if (!localStorage.getItem("sa-onboarded")) $("onboard-card").classList.remove("hidden"); } catch {}
         await refreshStatus();
       } catch (err) {
         showError("login-error", err.message);
@@ -858,6 +892,7 @@
     });
 
     async function stopDesktop() {
+      if (!confirm("确定停止云桌面吗？\n\n未保存的工作将丢失，重新进入约需 10–25 秒。\n（只想退出画面请点「返回主页」，桌面会保持运行）")) return;
       showError("dash-error", "");
       $("btn-stop").disabled = true;
       try {
@@ -892,6 +927,11 @@
 
     $("bar-newtab").addEventListener("click", () => {
       window.open("/desktop/", "_blank");
+    });
+
+    $("onboard-close").addEventListener("click", () => {
+      $("onboard-card").classList.add("hidden");
+      try { localStorage.setItem("sa-onboarded", "1"); } catch {}
     });
 
     $("btn-logout").addEventListener("click", async () => {

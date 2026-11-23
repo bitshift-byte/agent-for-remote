@@ -27,6 +27,7 @@ type FileEntry struct {
 type ManifestResponse struct {
 	Username   string               `json:"username"`
 	Files      map[string]FileEntry `json:"files"`
+	Dirs       []string             `json:"dirs"`
 	ActiveLock *DeviceLock          `json:"active_lock,omitempty"`
 	ServerTime int64                `json:"server_time_nano"`
 }
@@ -63,6 +64,7 @@ func (s *Service) BuildManifest(username string) (*ManifestResponse, error) {
 	}
 
 	files := make(map[string]FileEntry)
+	dirs := make([]string, 0)
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -81,7 +83,11 @@ func (s *Service) BuildManifest(username string) (*ManifestResponse, error) {
 			}
 			return nil
 		}
-		if d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+		if d.IsDir() {
+			dirs = append(dirs, relSlash)
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		info, err := d.Info()
@@ -108,6 +114,7 @@ func (s *Service) BuildManifest(username string) (*ManifestResponse, error) {
 	return &ManifestResponse{
 		Username:   username,
 		Files:      files,
+		Dirs:       dirs,
 		ActiveLock: s.locks.Get(username),
 		ServerTime: time.Now().UTC().UnixNano(),
 	}, nil
@@ -253,6 +260,50 @@ func (s *Service) DeleteFile(username, relPath string) error {
 	}
 
 	err = os.Remove(fullPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) EnsureDir(username, relPath string) error {
+	norm, err := NormalizeRelPath(relPath)
+	if err != nil {
+		return err
+	}
+	if IsIgnored(norm) {
+		return ErrIgnoredPath
+	}
+
+	root, err := s.UserWorkspaceDir(username)
+	if err != nil {
+		return err
+	}
+	fullPath, err := ResolveSafeJoin(root, norm)
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(fullPath, 0o755)
+}
+
+func (s *Service) DeleteDir(username, relPath string) error {
+	norm, err := NormalizeRelPath(relPath)
+	if err != nil {
+		return err
+	}
+	if IsIgnored(norm) {
+		return ErrIgnoredPath
+	}
+
+	root, err := s.UserWorkspaceDir(username)
+	if err != nil {
+		return err
+	}
+	fullPath, err := ResolveSafeJoin(root, norm)
+	if err != nil {
+		return err
+	}
+	err = os.RemoveAll(fullPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

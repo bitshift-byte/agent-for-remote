@@ -65,6 +65,7 @@ type FileEntry struct {
 type ManifestResponse struct {
 	Username   string               `json:"username"`
 	Files      map[string]FileEntry `json:"files"`
+	Dirs       []string             `json:"dirs"`
 	ActiveLock *DeviceLock          `json:"active_lock,omitempty"`
 	ServerTime int64                `json:"server_time_nano"`
 }
@@ -337,6 +338,56 @@ func (c *Client) DeleteFile(ctx context.Context, relPath string) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("delete %s failed (%d): %s", relPath, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (c *Client) CreateDir(ctx context.Context, relPath string) error {
+	endpoint := "/api/sync/dir?path=" + url.QueryEscape(relPath)
+	req, err := c.newAuthedRequest(ctx, http.MethodPut, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Device-ID", c.deviceID)
+	req.Header.Set("X-Lease-Token", c.leaseToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusPreconditionFailed {
+		return ErrLockLost
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("mkdir %s failed (%d): %s", relPath, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (c *Client) DeleteDir(ctx context.Context, relPath string) error {
+	endpoint := "/api/sync/dir?path=" + url.QueryEscape(relPath)
+	req, err := c.newAuthedRequest(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Device-ID", c.deviceID)
+	req.Header.Set("X-Lease-Token", c.leaseToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusPreconditionFailed {
+		return ErrLockLost
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("rmdir %s failed (%d): %s", relPath, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

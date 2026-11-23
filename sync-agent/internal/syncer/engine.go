@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,7 @@ type DeviceIdentity struct {
 
 type SyncState struct {
 	Files map[string]FileEntry `json:"files"`
+	Dirs  []string             `json:"dirs,omitempty"`
 }
 
 type SyncStats struct {
@@ -42,11 +44,12 @@ type SyncStats struct {
 }
 
 type Engine struct {
-	rootDir  string
-	client   *Client
-	ignore   *IgnoreMatcher
-	baseline map[string]FileEntry
-	hashCache map[string]FileEntry
+	rootDir      string
+	client       *Client
+	ignore       *IgnoreMatcher
+	baseline     map[string]FileEntry
+	baselineDirs map[string]bool
+	hashCache    map[string]FileEntry
 }
 
 func NewEngine(rootDir string, client *Client) (*Engine, error) {
@@ -59,11 +62,12 @@ func NewEngine(rootDir string, client *Client) (*Engine, error) {
 	}
 
 	e := &Engine{
-		rootDir:   absRoot,
-		client:    client,
-		ignore:    LoadIgnoreMatcher(absRoot),
-		baseline:  make(map[string]FileEntry),
-		hashCache: make(map[string]FileEntry),
+		rootDir:      absRoot,
+		client:       client,
+		ignore:       LoadIgnoreMatcher(absRoot),
+		baseline:     make(map[string]FileEntry),
+		baselineDirs: make(map[string]bool),
+		hashCache:    make(map[string]FileEntry),
 	}
 	e.loadState()
 	return e, nil
@@ -101,7 +105,7 @@ func LoadOrCreateDeviceIdentity(rootDir, customName string) (*DeviceIdentity, er
 	return id, nil
 }
 
-// InitialTakeoverPull pulls all latest cloud files onto this device after taking over the active device lock,
+// InitialTakeoverPull pulls all latest cloud files & directories onto this device after taking over the active device lock,
 // preventing stale local files from overwriting newer cloud code.
 func (e *Engine) InitialTakeoverPull(ctx context.Context) (SyncStats, error) {
 	var stats SyncStats
@@ -109,15 +113,27 @@ func (e *Engine) InitialTakeoverPull(ctx context.Context) (SyncStats, error) {
 	if err != nil {
 		return stats, err
 	}
-	local, err := e.scanLocal()
+	localFiles, localDirs, err := e.scanLocal()
 	if err != nil {
 		return stats, err
+	}
+
+	nextDirs := make(map[string]bool, len(manifest.Dirs))
+	for _, relDir := range sortDirsShallowFirst(manifest.Dirs) {
+		if !localDirs[relDir] {
+			if err := os.MkdirAll(filepath.Join(e.rootDir, filepath.FromSlash(relDir)), 0o755); err != nil {
+				return stats, err
+			}
+			stats.Pulled++
+			log.Printf("[sync] ↓ mkdir locally %s", relDir)
+		}
+		nextDirs[relDir] = true
 	}
 
 	nextBaseline := make(map[string]FileEntry, len(manifest.Files))
 	for _, rel := range sortedKeys(manifest.Files) {
 		remote := manifest.Files[rel]
-		if loc, ok := local[rel]; ok && loc.SHA256 == remote.SHA256 {
+		if loc, ok := localFiles[rel]; ok && loc.SHA256 == remote.SHA256 {
 			nextBaseline[rel] = remote
 			continue
 		}
@@ -129,11 +145,12 @@ func (e *Engine) InitialTakeoverPull(ctx context.Context) (SyncStats, error) {
 	}
 
 	e.baseline = nextBaseline
+	e.baselineDirs = nextDirs
 	e.saveState()
 	return stats, nil
 }
 
-// SyncOnce performs a single 3-way differential reconciliation between Local, Baseline, and Cloud.
+// SyncOnce performs a single 3-way differential reconciliation for both files and empty directories.
 func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 	var stats SyncStats
 
@@ -141,13 +158,62 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 	if err != nil {
 		return stats, err
 	}
-	local, err := e.scanLocal()
+	localFiles, localDirs, err := e.scanLocal()
 	if err != nil {
 		return stats, err
 	}
 
+	remoteDirs := make(map[string]bool, len(manifest.Dirs))
+	for _, d := range manifest.Dirs {
+		remoteDirs[d] = true
+	}
+
+	// Phase A: Reconcile directory creations (shallow-to-deep)
+	allDirSet := make(map[string]struct{})
+	for d := range localDirs {
+		allDirSet[d] = struct{}{}
+	}
+	for d := range remoteDirs {
+		allDirSet[d] = struct{}{}
+	}
+	for d := range e.baselineDirs {
+		allDirSet[d] = struct{}{}
+	}
+	allDirs := make([]string, 0, len(allDirSet))
+	for d := range allDirSet {
+		allDirs = append(allDirs, d)
+	}
+
+	for _, relDir := range sortDirsShallowFirst(allDirs) {
+		hasLocal := localDirs[relDir]
+		hasRemote := remoteDirs[relDir]
+		hasBase := e.baselineDirs[relDir]
+
+		switch {
+		case hasLocal && hasRemote:
+			e.baselineDirs[relDir] = true
+		case hasLocal && !hasRemote && !hasBase:
+			if err := e.client.CreateDir(ctx, relDir); err != nil {
+				return stats, err
+			}
+			remoteDirs[relDir] = true
+			e.baselineDirs[relDir] = true
+			stats.Pushed++
+			log.Printf("[sync] ↑ mkdir on cloud %s", relDir)
+		case !hasLocal && hasRemote && !hasBase:
+			if err := os.MkdirAll(filepath.Join(e.rootDir, filepath.FromSlash(relDir)), 0o755); err != nil {
+				return stats, err
+			}
+			localDirs[relDir] = true
+			e.baselineDirs[relDir] = true
+			stats.Pulled++
+			log.Printf("[sync] ↓ mkdir locally %s", relDir)
+		}
+	}
+
+	// Phase B: Reconcile files (push / pull / delete / conflict backup)
 	allPaths := make(map[string]struct{})
-	for p := range local {
+	for p := range localFiles {
 		allPaths[p] = struct{}{}
 	}
 	for p := range manifest.Files {
@@ -164,7 +230,7 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 	sort.Strings(paths)
 
 	for _, rel := range paths {
-		loc, hasLocal := local[rel]
+		loc, hasLocal := localFiles[rel]
 		rem, hasRemote := manifest.Files[rel]
 		base, hasBase := e.baseline[rel]
 
@@ -192,7 +258,6 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 				e.baseline[rel] = rem
 				stats.Pulled++
 			default:
-				// Both sides modified concurrently: keep newer version and preserve backup copy of conflict
 				if loc.ModTimeNano >= rem.ModTimeNano {
 					if err := e.saveRemoteConflictCopy(ctx, rel); err == nil {
 						stats.Conflicts++
@@ -217,7 +282,6 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 
 		case hasLocal && !hasRemote:
 			if hasBase && loc.SHA256 == base.SHA256 {
-				// Deleted on cloud while unchanged locally -> delete locally
 				if err := os.Remove(filepath.Join(e.rootDir, filepath.FromSlash(rel))); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return stats, err
 				}
@@ -226,7 +290,6 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 				stats.Deleted++
 				log.Printf("[sync] 🗑 deleted locally %s (removed on cloud)", rel)
 			} else {
-				// Created or modified locally -> push to cloud
 				entry, err := e.pushFile(ctx, rel, loc)
 				if err != nil {
 					return stats, err
@@ -237,7 +300,6 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 
 		case !hasLocal && hasRemote:
 			if hasBase && rem.SHA256 == base.SHA256 {
-				// Deleted locally while unchanged on cloud -> delete on cloud
 				if err := e.client.DeleteFile(ctx, rel); err != nil {
 					return stats, err
 				}
@@ -245,7 +307,6 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 				stats.Deleted++
 				log.Printf("[sync] 🗑 deleted on cloud %s (removed locally)", rel)
 			} else {
-				// Created or modified on cloud -> pull locally
 				if err := e.pullFile(ctx, rel); err != nil {
 					return stats, err
 				}
@@ -255,6 +316,32 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 
 		default:
 			delete(e.baseline, rel)
+		}
+	}
+
+	// Phase C: Reconcile directory deletions (deep-to-shallow)
+	for _, relDir := range sortDirsDeepFirst(allDirs) {
+		hasLocal := localDirs[relDir]
+		hasRemote := remoteDirs[relDir]
+		hasBase := e.baselineDirs[relDir]
+
+		switch {
+		case hasLocal && !hasRemote && hasBase:
+			// Deleted on cloud -> remove locally if empty (safe against newly created local files)
+			if err := os.Remove(filepath.Join(e.rootDir, filepath.FromSlash(relDir))); err == nil || errors.Is(err, os.ErrNotExist) {
+				delete(e.baselineDirs, relDir)
+				stats.Deleted++
+				log.Printf("[sync] 🗑 removed dir locally %s (removed on cloud)", relDir)
+			}
+		case !hasLocal && hasRemote && hasBase:
+			if err := e.client.DeleteDir(ctx, relDir); err != nil {
+				return stats, err
+			}
+			delete(e.baselineDirs, relDir)
+			stats.Deleted++
+			log.Printf("[sync] 🗑 removed dir on cloud %s (removed locally)", relDir)
+		case !hasLocal && !hasRemote:
+			delete(e.baselineDirs, relDir)
 		}
 	}
 
@@ -329,8 +416,9 @@ func (e *Engine) saveRemoteConflictCopy(ctx context.Context, rel string) error {
 	return os.WriteFile(dst, data, 0o644)
 }
 
-func (e *Engine) scanLocal() (map[string]FileEntry, error) {
+func (e *Engine) scanLocal() (map[string]FileEntry, map[string]bool, error) {
 	files := make(map[string]FileEntry)
+	dirs := make(map[string]bool)
 	err := filepath.WalkDir(e.rootDir, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -349,7 +437,11 @@ func (e *Engine) scanLocal() (map[string]FileEntry, error) {
 			}
 			return nil
 		}
-		if d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+		if d.IsDir() {
+			dirs[relSlash] = true
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		info, err := d.Info()
@@ -378,7 +470,7 @@ func (e *Engine) scanLocal() (map[string]FileEntry, error) {
 		files[relSlash] = entry
 		return nil
 	})
-	return files, err
+	return files, dirs, err
 }
 
 func (e *Engine) loadState() {
@@ -387,13 +479,23 @@ func (e *Engine) loadState() {
 		return
 	}
 	var st SyncState
-	if json.Unmarshal(raw, &st) == nil && st.Files != nil {
-		e.baseline = st.Files
+	if json.Unmarshal(raw, &st) == nil {
+		if st.Files != nil {
+			e.baseline = st.Files
+		}
+		for _, d := range st.Dirs {
+			e.baselineDirs[d] = true
+		}
 	}
 }
 
 func (e *Engine) saveState() {
-	raw, err := json.MarshalIndent(SyncState{Files: e.baseline}, "", "  ")
+	dirs := make([]string, 0, len(e.baselineDirs))
+	for d := range e.baselineDirs {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	raw, err := json.MarshalIndent(SyncState{Files: e.baseline, Dirs: dirs}, "", "  ")
 	if err != nil {
 		return
 	}
@@ -420,4 +522,30 @@ func sortedKeys(m map[string]FileEntry) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func sortDirsShallowFirst(dirs []string) []string {
+	cp := append([]string(nil), dirs...)
+	sort.Slice(cp, func(i, j int) bool {
+		di := strings.Count(cp[i], "/")
+		dj := strings.Count(cp[j], "/")
+		if di != dj {
+			return di < dj
+		}
+		return cp[i] < cp[j]
+	})
+	return cp
+}
+
+func sortDirsDeepFirst(dirs []string) []string {
+	cp := append([]string(nil), dirs...)
+	sort.Slice(cp, func(i, j int) bool {
+		di := strings.Count(cp[i], "/")
+		dj := strings.Count(cp[j], "/")
+		if di != dj {
+			return di > dj
+		}
+		return cp[i] > cp[j]
+	})
+	return cp
 }

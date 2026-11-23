@@ -20,6 +20,7 @@ func (s *Server) registerSyncRoutes() {
 	s.mux.HandleFunc("/api/sync/lock/release", s.requireAuth(s.handleSyncLockRelease))
 	s.mux.HandleFunc("/api/sync/manifest", s.requireAuth(s.handleSyncManifest))
 	s.mux.HandleFunc("/api/sync/file", s.requireAuth(s.handleSyncFile))
+	s.mux.HandleFunc("/api/sync/dir", s.requireAuth(s.handleSyncDir))
 }
 
 func (s *Server) handleSyncLockStatus(w http.ResponseWriter, r *http.Request, username string) {
@@ -193,6 +194,43 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 			return
 		}
 		log.Printf("[sync/file] 🗑 DELETE user=%s device=%s path=%s", username, r.Header.Get("X-Device-ID"), relPath)
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": relPath})
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func (s *Server) handleSyncDir(w http.ResponseWriter, r *http.Request, username string) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path query parameter"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		if !s.verifyWriteLock(w, r, username) {
+			return
+		}
+		if err := s.syncSvc.EnsureDir(username, relPath); err != nil {
+			log.Printf("[sync/dir] MKDIR error user=%s path=%s err=%v", username, relPath, err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("[sync/dir] ↑ MKDIR user=%s device=%s path=%s", username, r.Header.Get("X-Device-ID"), relPath)
+		writeJSON(w, http.StatusOK, map[string]string{"created": relPath})
+
+	case http.MethodDelete:
+		if !s.verifyWriteLock(w, r, username) {
+			return
+		}
+		if err := s.syncSvc.DeleteDir(username, relPath); err != nil {
+			log.Printf("[sync/dir] RMDIR error user=%s path=%s err=%v", username, relPath, err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("[sync/dir] 🗑 RMDIR user=%s device=%s path=%s", username, r.Header.Get("X-Device-ID"), relPath)
 		writeJSON(w, http.StatusOK, map[string]string{"deleted": relPath})
 
 	default:

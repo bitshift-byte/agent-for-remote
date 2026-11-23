@@ -3,15 +3,21 @@ const el = (id) => document.getElementById(id);
 
 let initialized = false;
 let lastServerURL = "";
+let lastProfilesKey = "";
+let lastApprovalsKey = "";
 
 const stateLabels = {
-  running: "运行中（双向同步 + 本地执行就绪）",
+  running: "运行中（双向同步 + 本地执行 + 端口预览就绪）",
   starting: "正在连接云端...",
   stopped: "已停止",
   conflict: "另一台设备正在同步",
   lock_lost: "已被其他设备接管（已自动暂停）",
   error: "连接异常",
 };
+
+function escapeHTML(str) {
+  return String(str).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
 
 async function callAPI(path, opts = {}) {
   const res = await fetch(API + path, {
@@ -32,6 +38,72 @@ function showAlert(msg) {
     box.textContent = msg;
     box.classList.remove("hidden");
   }
+}
+
+function renderApprovals(list) {
+  const box = el("approval-box");
+  const container = el("approval-list");
+  const items = list || [];
+  const key = JSON.stringify(items.map((x) => x.job_id));
+  if (items.length === 0) {
+    box.classList.add("hidden");
+    if (lastApprovalsKey !== "") {
+      container.innerHTML = "";
+      lastApprovalsKey = "";
+    }
+    return;
+  }
+  box.classList.remove("hidden");
+  if (key === lastApprovalsKey) return;
+  lastApprovalsKey = key;
+
+  container.innerHTML = items.map((item) => `
+    <div style="background:#0c1326;border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:10px;">
+      <div style="font-size:12px;color:#fcd34d;margin-bottom:4px;">风险项：${escapeHTML(item.reason)}</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fff;background:#080d1a;padding:6px 8px;border-radius:6px;word-break:break-all;margin-bottom:8px;">${escapeHTML(item.command)}</div>
+      <div style="display:flex;gap:8px;">
+        <button data-approve="${escapeHTML(item.job_id)}" class="btn-primary" style="padding:5px 12px;font-size:12px;">允许执行</button>
+        <button data-reject="${escapeHTML(item.job_id)}" class="btn-danger" style="padding:5px 12px;font-size:12px;">拒绝</button>
+      </div>
+    </div>
+  `).join("");
+
+  container.querySelectorAll("[data-approve]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        render(await callAPI("/local/approvals/decide", {
+          method: "POST",
+          body: JSON.stringify({ job_id: btn.getAttribute("data-approve"), approve: true }),
+        }));
+      } catch (err) {
+        showAlert(err.message);
+      }
+    });
+  });
+  container.querySelectorAll("[data-reject]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        render(await callAPI("/local/approvals/decide", {
+          method: "POST",
+          body: JSON.stringify({ job_id: btn.getAttribute("data-reject"), approve: false }),
+        }));
+      } catch (err) {
+        showAlert(err.message);
+      }
+    });
+  });
+}
+
+function renderProfiles(profiles, currentDir) {
+  const select = el("profile-select");
+  if (!select) return;
+  const list = profiles || [];
+  const key = JSON.stringify(list) + "|" + (currentDir || "");
+  if (key === lastProfilesKey) return;
+  lastProfilesKey = key;
+
+  select.innerHTML = `<option value="">-- 选择已保存项目 (${list.length}) --</option>` +
+    list.map((p) => `<option value="${escapeHTML(p.dir)}" ${p.dir === currentDir ? "selected" : ""}>${escapeHTML(p.name)} — ${escapeHTML(p.dir)}</option>`).join("");
 }
 
 function render(st) {
@@ -62,6 +134,9 @@ function render(st) {
   } else {
     el("meta-lock").textContent = "未持有";
   }
+
+  renderApprovals(st.pending_approvals);
+  renderProfiles(st.profiles, st.dir);
 
   showAlert(st.last_error || "");
   el("btn-takeover").classList.toggle("hidden", !(state === "conflict" || state === "lock_lost"));
@@ -106,6 +181,40 @@ async function pickFolderInto(inputId, autoSave) {
 
 el("btn-pick-pair").addEventListener("click", () => pickFolderInto("pair-dir", false));
 el("btn-pick-bound").addEventListener("click", () => pickFolderInto("bound-dir", true));
+
+el("btn-save-profile").addEventListener("click", async () => {
+  const dir = el("bound-dir").value.trim();
+  if (!dir) {
+    showAlert("请先选择或填写本地目录路径");
+    return;
+  }
+  showAlert("");
+  try {
+    const st = await callAPI("/local/profiles", {
+      method: "POST",
+      body: JSON.stringify({ action: "add", dir }),
+    });
+    render(st);
+  } catch (err) {
+    showAlert(err.message);
+  }
+});
+
+el("profile-select").addEventListener("change", async (e) => {
+  const dir = e.target.value;
+  if (!dir) return;
+  showAlert("");
+  try {
+    el("bound-dir").value = dir;
+    const st = await callAPI("/local/profiles", {
+      method: "POST",
+      body: JSON.stringify({ action: "switch", dir }),
+    });
+    render(st);
+  } catch (err) {
+    showAlert(err.message);
+  }
+});
 
 el("btn-bind").addEventListener("click", async () => {
   showAlert("");

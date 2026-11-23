@@ -225,6 +225,71 @@ func (m *Manager) StopDesktop(ctx context.Context, username string) error {
 	return m.client.StopContainer(ctx, ContainerName(username), 10)
 }
 
+// StartIdleReaper periodically pauses running desktop containers that have been idle longer than DesktopIdlePause,
+// reducing idle CPU to zero while preserving all open GUI apps & terminal sessions for instant Unpause wake-up.
+func (m *Manager) StartIdleReaper(ctx context.Context) {
+	if m.cfg.DesktopIdlePause <= 0 {
+		log.Println("[reaper] idle auto-pause disabled (DESKTOP_IDLE_PAUSE_MIN=0)")
+		return
+	}
+	log.Printf("[reaper] idle auto-pause enabled: pausing containers after %s of inactivity", m.cfg.DesktopIdlePause)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reapIdleOnce(ctx)
+		}
+	}
+}
+
+func (m *Manager) reapIdleOnce(ctx context.Context) {
+	now := time.Now().UTC()
+	m.mu.Lock()
+	candidates := make([]string, 0)
+	for user, ts := range m.lastActive {
+		if now.Sub(ts) >= m.cfg.DesktopIdlePause {
+			candidates = append(candidates, user)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, user := range candidates {
+		ulock := m.lockForUser(user)
+		ulock.Lock()
+		last := m.LastActive(user)
+		if time.Since(last) < m.cfg.DesktopIdlePause {
+			ulock.Unlock()
+			continue
+		}
+		if m.cfg.MockDesktop {
+			m.mu.Lock()
+			if m.mockStates[user] == "running" {
+				m.mockStates[user] = "paused"
+				log.Printf("[reaper] paused mock desktop for user=%s after %s idle", user, m.cfg.DesktopIdlePause)
+			}
+			m.mu.Unlock()
+			ulock.Unlock()
+			continue
+		}
+		name := ContainerName(user)
+		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		info, err := m.client.InspectContainer(checkCtx, name)
+		if err == nil && info.State.Running && !info.State.Paused {
+			if pauseErr := m.client.PauseContainer(checkCtx, name); pauseErr != nil {
+				log.Printf("[reaper] pause %s failed: %v", name, pauseErr)
+			} else {
+				log.Printf("[reaper] ❄ auto-paused idle desktop %s (user=%s, idle=%s)", name, user, time.Since(last).Round(time.Second))
+			}
+		}
+		cancel()
+		ulock.Unlock()
+	}
+}
+
 func (m *Manager) createDesktopContainer(ctx context.Context, username, name string) error {
 	safeUser := SanitizeUsername(username)
 
@@ -270,6 +335,17 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 	}
 	if m.cfg.DesktopTheme != "" {
 		env = append(env, "DESKTOP_THEME="+m.cfg.DesktopTheme)
+	}
+	if m.cfg.SelkiesPaintOverQuality != "" {
+		env = append(env, "SELKIES_USE_PAINT_OVER_QUALITY="+m.cfg.SelkiesPaintOverQuality)
+	}
+	if m.cfg.SelkiesExtraEnv != "" {
+		for _, pair := range strings.Split(m.cfg.SelkiesExtraEnv, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair != "" && strings.Contains(pair, "=") {
+				env = append(env, pair)
+			}
+		}
 	}
 
 	workspaceBind := fmt.Sprintf("sa-workspace-%s:/workspace", safeUser)

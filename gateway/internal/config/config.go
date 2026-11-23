@@ -21,11 +21,14 @@ type Config struct {
 	DesktopCPUs      float64
 	DesktopShmMB     int64
 	DesktopTZ        string
-	DesktopDPI       string
-	DesktopFontSize  string
-	DesktopTheme     string
-	StartTimeout     time.Duration
-	MockDesktop      bool
+	DesktopDPI              string
+	DesktopFontSize         string
+	DesktopTheme            string
+	DesktopIdlePause        time.Duration
+	SelkiesPaintOverQuality string
+	SelkiesExtraEnv         string
+	StartTimeout            time.Duration
+	MockDesktop             bool
 	WorkspaceDataDir string
 	WorkspaceHostDir string
 	SyncLockTTL      time.Duration
@@ -72,6 +75,9 @@ func Load() (*Config, error) {
 		DesktopDPI:              strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
 		DesktopFontSize:         strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
 		DesktopTheme:            strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
+		DesktopIdlePause:        time.Duration(getEnvNonNegInt("DESKTOP_IDLE_PAUSE_MIN", 30)) * time.Minute,
+		SelkiesPaintOverQuality: getEnv("SELKIES_USE_PAINT_OVER_QUALITY", "true"),
+		SelkiesExtraEnv:         strings.TrimSpace(os.Getenv("SELKIES_EXTRA_ENV")),
 		StartTimeout:            time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
 		MockDesktop:             getEnvBool("MOCK_DESKTOP", false),
 		WorkspaceDataDir:        getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),
@@ -122,6 +128,18 @@ func getEnvInt(key string, fallback int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func getEnvNonNegInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
 		return fallback
 	}
 	return n

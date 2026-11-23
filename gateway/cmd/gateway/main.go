@@ -16,6 +16,7 @@ import (
 	"super-agent/gateway/internal/proxy"
 	"super-agent/gateway/internal/server"
 	"super-agent/gateway/internal/syncsvc"
+	"super-agent/gateway/internal/tunnel"
 )
 
 func main() {
@@ -45,8 +46,13 @@ func main() {
 	lockMgr := syncsvc.NewLockManager(cfg.SyncLockTTL)
 	syncSvc := syncsvc.NewService(cfg.WorkspaceDataDir, lockMgr)
 	execBroker := execbridge.NewBroker()
+	tunnelBroker := tunnel.NewBroker()
 	devices := syncsvc.NewDeviceRegistry(cfg.WorkspaceDataDir)
-	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker, devices)
+	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker, tunnelBroker, devices)
+
+	reaperCtx, cancelReaper := context.WithCancel(context.Background())
+	defer cancelReaper()
+	go dockerMgr.StartIdleReaper(reaperCtx)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

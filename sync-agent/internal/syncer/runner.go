@@ -89,9 +89,13 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 		log.Println("[sync] initial sync check complete — watching for changes...")
 	}
 
-	// Start reverse local command execution worker (with Pre/Post Sync Barriers)
+	// Start reverse local command execution worker (with Pre/Post Sync Barriers) and local port preview tunnel
 	go RunExecLoop(runCtx, client, engine, &syncMu, func() {
 		log.Println("[lock] another device took over the workspace lock — pausing local exec & sync.")
+		cancelRun()
+	})
+	go RunTunnelLoop(runCtx, client, func() {
+		log.Println("[lock] another device took over the workspace lock — pausing local preview tunnel.")
 		cancelRun()
 	})
 

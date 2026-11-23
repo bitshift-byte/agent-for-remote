@@ -17,33 +17,41 @@ import (
 	"time"
 )
 
+type WorkspaceProfile struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
 type LocalConfig struct {
-	Server        string `json:"server"`
-	Username      string `json:"username"`
-	DeviceToken   string `json:"device_token,omitempty"`
-	PayloadKeyB64 string `json:"payload_key_b64,omitempty"`
-	Token         string `json:"token,omitempty"`
-	Dir           string `json:"dir"`
-	DeviceName    string `json:"device_name"`
-	IntervalMs    int    `json:"interval_ms"`
+	Server        string             `json:"server"`
+	Username      string             `json:"username"`
+	DeviceToken   string             `json:"device_token,omitempty"`
+	PayloadKeyB64 string             `json:"payload_key_b64,omitempty"`
+	Token         string             `json:"token,omitempty"`
+	Dir           string             `json:"dir"`
+	Profiles      []WorkspaceProfile `json:"profiles,omitempty"`
+	DeviceName    string             `json:"device_name"`
+	IntervalMs    int                `json:"interval_ms"`
 }
 
 type StatusSnapshot struct {
-	State      string      `json:"state"` // "stopped", "starting", "running", "conflict", "lock_lost", "error"
-	Running    bool        `json:"running"`
-	Bound      bool        `json:"bound"`
-	Encrypted  bool        `json:"encrypted"`
-	LastError  string      `json:"last_error,omitempty"`
-	LockedBy   *DeviceLock `json:"locked_by,omitempty"`
-	Epoch      int64       `json:"epoch,omitempty"`
-	Server     string      `json:"server"`
-	Username   string      `json:"username"`
-	HasToken   bool        `json:"has_token"`
-	Dir        string      `json:"dir"`
-	DeviceName string      `json:"device_name"`
-	DeviceID   string      `json:"device_id"`
-	OS         string      `json:"os"`
-	Logs       []string    `json:"logs"`
+	State            string             `json:"state"` // "stopped", "starting", "running", "conflict", "lock_lost", "error"
+	Running          bool               `json:"running"`
+	Bound            bool               `json:"bound"`
+	Encrypted        bool               `json:"encrypted"`
+	LastError        string             `json:"last_error,omitempty"`
+	LockedBy         *DeviceLock        `json:"locked_by,omitempty"`
+	Epoch            int64              `json:"epoch,omitempty"`
+	Server           string             `json:"server"`
+	Username         string             `json:"username"`
+	HasToken         bool               `json:"has_token"`
+	Dir              string             `json:"dir"`
+	Profiles         []WorkspaceProfile `json:"profiles,omitempty"`
+	PendingApprovals []PendingApproval  `json:"pending_approvals,omitempty"`
+	DeviceName       string             `json:"device_name"`
+	DeviceID         string             `json:"device_id"`
+	OS               string             `json:"os"`
+	Logs             []string           `json:"logs"`
 }
 
 type logRing struct {
@@ -85,6 +93,7 @@ type Controller struct {
 	cfgPath   string
 	cfg       LocalConfig
 	identity  *DeviceIdentity
+	approvals *ApprovalManager
 	state     string
 	lastError string
 	lockedBy  *DeviceLock
@@ -105,9 +114,10 @@ func NewController() *Controller {
 	log.SetOutput(io.MultiWriter(os.Stderr, ring))
 
 	c := &Controller{
-		cfgPath: cfgPath,
-		state:   "stopped",
-		logs:    ring,
+		cfgPath:   cfgPath,
+		approvals: NewApprovalManager(90 * time.Second),
+		state:     "stopped",
+		logs:      ring,
 		cfg: LocalConfig{
 			Server:     "http://localhost:8080",
 			IntervalMs: 800,
@@ -149,6 +159,9 @@ func (c *Controller) loadConfig() {
 		if loaded.Dir != "" {
 			c.cfg.Dir = loaded.Dir
 		}
+		if len(loaded.Profiles) > 0 {
+			c.cfg.Profiles = loaded.Profiles
+		}
 		if loaded.DeviceName != "" {
 			c.cfg.DeviceName = loaded.DeviceName
 		}
@@ -182,22 +195,25 @@ func (c *Controller) Status() StatusSnapshot {
 		lockedCopy = &cp
 	}
 	bound := c.cfg.DeviceToken != "" || c.cfg.Token != ""
+	profilesCopy := append([]WorkspaceProfile(nil), c.cfg.Profiles...)
 	return StatusSnapshot{
-		State:      c.state,
-		Running:    c.state == "running" || c.state == "starting",
-		Bound:      bound,
-		Encrypted:  c.cfg.PayloadKeyB64 != "",
-		LastError:  c.lastError,
-		LockedBy:   lockedCopy,
-		Epoch:      c.epoch,
-		Server:     c.cfg.Server,
-		Username:   c.cfg.Username,
-		HasToken:   bound,
-		Dir:        c.cfg.Dir,
-		DeviceName: c.cfg.DeviceName,
-		DeviceID:   devID,
-		OS:         devOS,
-		Logs:       c.logs.Snapshot(),
+		State:            c.state,
+		Running:          c.state == "running" || c.state == "starting",
+		Bound:            bound,
+		Encrypted:        c.cfg.PayloadKeyB64 != "",
+		LastError:        c.lastError,
+		LockedBy:         lockedCopy,
+		Epoch:            c.epoch,
+		Server:           c.cfg.Server,
+		Username:         c.cfg.Username,
+		HasToken:         bound,
+		Dir:              c.cfg.Dir,
+		Profiles:         profilesCopy,
+		PendingApprovals: c.approvals.Pending(),
+		DeviceName:       c.cfg.DeviceName,
+		DeviceID:         devID,
+		OS:               devOS,
+		Logs:             c.logs.Snapshot(),
 	}
 }
 
@@ -445,8 +461,13 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 		log.Printf("[sync] initial reconnect sync warning: %v", initErr)
 	}
 
-	go RunExecLoop(workerCtx, client, engine, &syncMu, func() {
+	go RunExecLoopWithApproval(workerCtx, client, engine, &syncMu, c.approvals, func() {
 		log.Println("[lock] another device took over — paused automatically")
+		c.setError("lock_lost", "同步权已被其他设备接管，本机已自动暂停", nil)
+		cancelWorker()
+	})
+	go RunTunnelLoop(workerCtx, client, func() {
+		log.Println("[lock] another device took over — paused preview tunnel")
 		c.setError("lock_lost", "同步权已被其他设备接管，本机已自动暂停", nil)
 		cancelWorker()
 	})
@@ -595,6 +616,93 @@ func (c *Controller) ServeControlAPI(addr string) error {
 			}
 		}
 		log.Printf("[sync] reset local sync baseline for %s (server=%s)", dir, srv)
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
+	mux.HandleFunc("/local/approvals/decide", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			JobID   string `json:"job_id"`
+			Approve bool   `json:"approve"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.JobID == "" {
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "job_id is required"})
+			return
+		}
+		if !c.approvals.Decide(req.JobID, req.Approve) {
+			writeLocalJSON(w, http.StatusNotFound, map[string]string{"error": "approval request expired or not found"})
+			return
+		}
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
+	mux.HandleFunc("/local/profiles", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			Action string `json:"action"` // "add", "switch", "delete"
+			Name   string `json:"name"`
+			Dir    string `json:"dir"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		dir := strings.TrimSpace(req.Dir)
+		name := strings.TrimSpace(req.Name)
+		if name == "" && dir != "" {
+			name = filepath.Base(dir)
+		}
+		c.mu.Lock()
+		wasRunning := c.cancel != nil
+		switch req.Action {
+		case "add":
+			if dir == "" {
+				c.mu.Unlock()
+				writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "dir is required"})
+				return
+			}
+			found := false
+			for i := range c.cfg.Profiles {
+				if c.cfg.Profiles[i].Dir == dir {
+					c.cfg.Profiles[i].Name = name
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.cfg.Profiles = append(c.cfg.Profiles, WorkspaceProfile{Name: name, Dir: dir})
+			}
+			c.cfg.Dir = dir
+		case "switch":
+			if dir == "" {
+				c.mu.Unlock()
+				writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "dir is required"})
+				return
+			}
+			c.cfg.Dir = dir
+		case "delete":
+			next := make([]WorkspaceProfile, 0, len(c.cfg.Profiles))
+			for _, p := range c.cfg.Profiles {
+				if p.Dir != dir {
+					next = append(next, p)
+				}
+			}
+			c.cfg.Profiles = next
+		default:
+			c.mu.Unlock()
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+			return
+		}
+		_ = c.saveConfigLocked()
+		c.mu.Unlock()
+		if wasRunning && (req.Action == "add" || req.Action == "switch") {
+			c.Stop()
+			_ = c.Start(false)
+		}
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
 

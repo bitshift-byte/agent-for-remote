@@ -89,6 +89,10 @@ func RewriteWorkspacePath(command, localRoot string) string {
 //   2. Safety check + execute command locally in the mapped repo folder
 //   3. Post-Exec Sync Barrier (push command-generated files back to cloud /workspace)
 func ExecuteJob(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *ExecJob) ExecResult {
+	return ExecuteJobWithApproval(ctx, engine, syncMu, job, nil)
+}
+
+func ExecuteJobWithApproval(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *ExecJob, approvals *ApprovalManager) ExecResult {
 	start := time.Now()
 	res := ExecResult{JobID: job.ID}
 
@@ -98,6 +102,17 @@ func ExecuteJob(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *Ex
 		res.DurationMs = time.Since(start).Milliseconds()
 		log.Printf("[exec] ⛔ blocked job=%s cmd=%q reason=%v", job.ID, job.Command, err)
 		return res
+	}
+
+	if approvals != nil {
+		if reason, needs := NeedsLocalApproval(job.Command); needs {
+			if err := approvals.Request(ctx, job, reason); err != nil {
+				res.Stderr = fmt.Sprintf("[SUPER-AGENT APPROVAL REJECTED] 本地高危命令未获批准 (%s): %v\n", reason, err)
+				res.ExitCode = 126
+				res.DurationMs = time.Since(start).Milliseconds()
+				return res
+			}
+		}
 	}
 
 	syncMu.Lock()
@@ -169,6 +184,10 @@ func ExecuteJob(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *Ex
 
 // RunExecLoop continuously long-polls the gateway for cloud-forwarded commands and executes them locally.
 func RunExecLoop(ctx context.Context, client *Client, engine *Engine, syncMu *sync.Mutex, onLockLost func()) {
+	RunExecLoopWithApproval(ctx, client, engine, syncMu, nil, onLockLost)
+}
+
+func RunExecLoopWithApproval(ctx context.Context, client *Client, engine *Engine, syncMu *sync.Mutex, approvals *ApprovalManager, onLockLost func()) {
 	log.Printf("[exec] local command bridge online — ready to execute cloud AI commands in %s", engine.rootDir)
 	for {
 		if ctx.Err() != nil {
@@ -197,7 +216,7 @@ func RunExecLoop(ctx context.Context, client *Client, engine *Engine, syncMu *sy
 			continue
 		}
 
-		res := ExecuteJob(ctx, engine, syncMu, job)
+		res := ExecuteJobWithApproval(ctx, engine, syncMu, job, approvals)
 		if err := client.SubmitExecResult(ctx, res); err != nil {
 			if errors.Is(err, ErrLockLost) {
 				if onLockLost != nil {

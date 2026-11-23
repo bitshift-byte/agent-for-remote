@@ -219,6 +219,20 @@ func (c *Client) StopContainer(ctx context.Context, nameOrID string, timeoutSec 
 	return fmt.Errorf("stop container %q failed (%d): %s", nameOrID, resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
+func (c *Client) PauseContainer(ctx context.Context, nameOrID string) error {
+	resp, err := c.do(ctx, http.MethodPost, "/containers/"+url.PathEscape(nameOrID)+"/pause", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("pause container %q failed (%d): %s", nameOrID, resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
 func (c *Client) UnpauseContainer(ctx context.Context, nameOrID string) error {
 	resp, err := c.do(ctx, http.MethodPost, "/containers/"+url.PathEscape(nameOrID)+"/unpause", nil)
 	if err != nil {

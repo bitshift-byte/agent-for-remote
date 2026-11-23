@@ -71,11 +71,18 @@
   - 升级 `gateway` 与 `.env.example`：新增 `DESKTOP_DPI`、`DESKTOP_FONT_SIZE`、`DESKTOP_THEME` 可选配置并透传至桌面容器。
 
 ### 8. 同步防误删安全护栏 + 本地掉线云端降级续跑与 Agent 小批量约束
-- **`feat(sync,exec-bridge,desktop)`** `add mass-deletion sync guardrail and cloud offline fallback with agent small-batch constraints`
-  - **修复同步误删 Bug（`sync-agent`）**：在 `SyncOnce()` 执行任何本地删除前加入预检护栏（`ErrMassDeleteBlocked`）——若云端目录突然变空（原基线 ≥ 3 文件且云端返回 0 文件）或单次请求删除 ≥ 10 个且占比 ≥ 50% 的本地文件，立即拦截并自动暂停同步，绝不静默清空本地仓库；将本地基线路径绑定为 `serverURL|absRoot` 防止跨环境串基线；新增 `/local/reset-baseline` 重置基线接口与 `TestMassDeletionGuardrailBlocksEmptyCloudWipe` 单元测试。
-  - **重连先同步再接管执行**：`sync-agent` 上线/重连后强制先完成初始对账同步（若触发误删护栏或锁丢失则直接中止），确认本地拿到云端离线期间的所有代码变更后再启动 `/api/exec/poll`。
-  - **结构化离线错误码（`gateway`）**：`/api/exec/run` 区分 `503 worker_offline`（本机离线，可安全云端降级）与 `504 job_timeout`（本机执行超时，严禁在云端重跑防非幂等副作用）。
-  - **云端离线降级与 Agent 资源感知（`desktop/scripts/sa-local-sh` & `sa-claude-hook`）**：本机掉线时自动降级在云端 `/bin/bash` 执行，实时读取容器 cgroup CPU/内存配额并写入 `/tmp/sa-runtime-env.json`；首次掉线跃迁注入结构化 `[SUPER-AGENT NOTICE]` 提示 Agent 必须拆分小批量任务，持续离线附带紧凑单行提示，本机重连后发出恢复提示；降级态自动注入低并发环境变量（`GOMAXPROCS=1`、`CARGO_BUILD_JOBS=1`、`MAKEFLAGS=-j1`、`NODE_OPTIONS=--max-old-space-size=2048`）并拦截典型全量重型命令或低内存（`< 1024MB`）执行；为 Claude Code 预置 `PreToolUse` Hook（`sa-claude-hook`）防止长对话遗忘约束。
+- **`9ece4f5`** `feat(sync,exec-bridge,desktop): add mass-deletion guardrail and cloud offline fallback with agent small-batch constraints`
+  - 修复 `sync-agent` 云端空目录/批量误删本地文件 Bug，新增 `ErrMassDeleteBlocked` 护栏与服务端基线隔离；上线重连先同步再接管执行；网关返回 `503 worker_offline` / `504 job_timeout`；`sa-local-sh` 支持离线云端降级、实时读取 cgroup 资源配额、动态小批量约束提示与重型任务/低内存软拦截，并新增 `sa-claude-hook`。
+- **`506b9de`** `fix(desktop,gateway): seed codex config on boot with dynamic gateway IP and runtime model overrides`
+  - 将 Codex 配置迁移至 `init-workspace.sh` 启动时动态生成（自动探测 Docker 网桥网关 IP），支持通过 `.env` 覆盖 `ANTHROPIC_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL`、`CODEX_MODEL`。
+
+### 9. 压榨 Selkies 与云地协同核心能力（空闲冻结 + 高危审批 + 本地端口穿透 + 多项目切换）
+- **`feat(gateway,sync-agent,tray,desktop)`** `add idle auto-pause, Selkies quality tuning, local approval workflow, encrypted localhost preview tunnel, and multi-project profiles`
+  - **空闲自动冻结（`docker pause`）**：`gateway` 新增 `PauseContainer` 与 `StartIdleReaper` 后台巡检，默认空闲 `30` 分钟自动冻结桌面容器（`DESKTOP_IDLE_PAUSE_MIN=30`，CPU 归零且保留所有窗口会话），再次访问自动秒级 `Unpause` 唤醒。
+  - **Selkies 2.0 画质与控制条增强**：默认透传 `SELKIES_USE_PAINT_OVER_QUALITY=true`（静止画面无损补帧）及通用 `SELKIES_EXTRA_ENV`（支持水印、帧率、锁定参数）；Web 桌面顶栏升级为实时 HUD，直接展示本机算力在线/云端降级状态、端口预览通道状态及一键预览本机端口入口。
+  - **本机高危命令人工审批流**：`sync-agent` 新增 `ApprovalManager`（覆盖 `git push --force`、`git reset --hard`、`rm -rf`、`DROP/TRUNCATE`、`kubectl delete`、`terraform destroy`、`docker rm` 等二级敏感命令），触发时在托盘应用弹出审批卡片支持一键「允许执行 / 拒绝」，拒绝或超时返回 `exit 126`。
+  - **加密本地端口反向穿透（Localhost Preview Tunnel）**：新增 `gateway/internal/tunnel`（`/api/tunnel/*`）与 `sync-agent/internal/syncer/tunnel.go`（复用 AES-256-GCM 端到端加密通道），并内置云端 `sa-preview <local-port> [cloud-port]` 助手，让云端 Chrome/Playwright 直接预览本机运行中的开发服务。
+  - **多项目 Workspace Profile 切换**：`sync-agent` 与 `tray-app` 新增常用项目收藏与一键切换（`/local/profiles`）。
 
 ---
 

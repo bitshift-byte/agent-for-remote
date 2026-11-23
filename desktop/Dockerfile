@@ -135,6 +135,7 @@ RUN chmod +x /tmp/setup-theme.sh && /tmp/setup-theme.sh && rm -f /tmp/setup-them
 RUN mkdir -p /workspace /custom-cont-init.d
 COPY scripts/sa-local-sh /usr/local/bin/sa-local-sh
 COPY scripts/sa-claude-hook /usr/local/bin/sa-claude-hook
+COPY scripts/sa-preview /usr/local/bin/sa-preview
 COPY scripts/sa-display /usr/local/bin/sa-display
 COPY scripts/super-agent-chatgpt /usr/local/bin/super-agent-chatgpt
 COPY scripts/super-agent-claude-desktop /usr/local/bin/super-agent-claude-desktop
@@ -142,6 +143,7 @@ COPY scripts/init-workspace.sh /custom-cont-init.d/99-super-agent-init.sh
 RUN chmod +x \
     /usr/local/bin/sa-local-sh \
     /usr/local/bin/sa-claude-hook \
+    /usr/local/bin/sa-preview \
     /usr/local/bin/sa-display \
     /usr/local/bin/super-agent-chatgpt \
     /usr/local/bin/super-agent-claude-desktop \

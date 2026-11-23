@@ -55,6 +55,7 @@ func (s *Server) handleExecRun(w http.ResponseWriter, r *http.Request, username 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required"})
 		return
 	}
+	s.docker.TouchActivity(username)
 
 	log.Printf("[exec/run] user=%s cwd=%s cmd=%q", username, req.Cwd, truncateForLog(req.Command, 120))
 	res, err := s.execBroker.Submit(r.Context(), username, req.Command, req.Cwd, req.TimeoutSec)

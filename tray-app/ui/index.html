@@ -71,6 +71,12 @@
 
     <div id="alert-box" class="alert hidden"></div>
 
+    <!-- High-Risk Command Approval Banner (Human-in-the-Loop) -->
+    <div id="approval-box" class="card hidden" style="border-color:rgba(245,158,11,0.65);background:rgba(245,158,11,0.08);">
+      <div style="font-weight:600;color:#fcd34d;margin-bottom:8px;">⚠️ 云端 Agent 请求执行高危命令（等待本机确认）</div>
+      <div id="approval-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+
     <!-- Unbound View: Zero-password 6-char Pairing Code Onboarding -->
     <div id="view-pair" class="card">
       <div style="font-weight:600;margin-bottom:6px;">绑定云端工作区（免密配对）</div>
@@ -103,7 +109,7 @@
       </div>
     </div>
 
-    <!-- Bound View: Status + Switch Folder + Lock Control -->
+    <!-- Bound View: Status + Multi-Project Switch + Lock Control -->
     <div id="view-bound" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
       <div class="card">
         <div class="meta-row">
@@ -121,6 +127,15 @@
       </div>
 
       <div class="card">
+        <div class="field">
+          <label for="profile-select">常用项目快速切换（多工作区 Profile）</label>
+          <div class="dir-row">
+            <select id="profile-select" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#0c1326;color:var(--text);font-size:13px;">
+              <option value="">-- 选择已保存项目 --</option>
+            </select>
+            <button id="btn-save-profile" type="button" class="btn-secondary">收藏当前目录</button>
+          </div>
+        </div>
         <div class="field">
           <label for="bound-dir">当前同步仓库目录（AI 命令将锁定在此目录执行）</label>
           <div class="dir-row">

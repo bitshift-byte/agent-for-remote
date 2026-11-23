@@ -300,15 +300,19 @@
     </div>
   </div>
 
-  <!-- Fullscreen KasmVNC Desktop View -->
+  <!-- Fullscreen Selkies Desktop View with Live Super-Agent Status HUD -->
   <div id="view-desktop" class="desktop-shell hidden">
     <div class="topbar">
       <div class="topbar-left">
         <span class="brand-dot" style="width:9px;height:9px;"></span>
         <strong>Super-Agent</strong>
         <span style="color:var(--muted);" id="bar-user"></span>
+        <span id="hud-worker-badge" class="badge badge-stopped" style="font-size:11px;">本机检测中...</span>
+        <span id="hud-tunnel-badge" class="badge badge-stopped" style="font-size:11px;">端口预览: 离线</span>
       </div>
       <div class="topbar-right">
+        <input id="hud-preview-port" type="text" placeholder="本地端口(如3000)" style="width:128px;margin:0;padding:4px 8px;font-size:12px;border-radius:7px;" />
+        <button id="bar-preview" class="btn-secondary">预览本机服务</button>
         <button id="bar-newtab" class="btn-secondary">新标签页全屏</button>
         <button id="bar-back" class="btn-secondary">返回控制台</button>
         <button id="bar-stop" class="btn-danger">停止释放</button>
@@ -469,9 +473,41 @@
       }
     });
 
+    let hudTimer = null;
+
+    async function refreshDesktopHUD() {
+      if ($("view-desktop").classList.contains("hidden")) return;
+      try {
+        const [execSt, tunSt] = await Promise.all([
+          api("/api/exec/status").catch(() => null),
+          api("/api/tunnel/status").catch(() => null),
+        ]);
+        const wb = $("hud-worker-badge");
+        if (execSt && execSt.worker_online) {
+          const dev = execSt.active_lock ? (execSt.active_lock.device_name || execSt.active_lock.device_id) : "本机";
+          wb.className = "badge badge-running";
+          wb.textContent = `● 本机算力在线 (${dev})`;
+        } else {
+          wb.className = "badge badge-starting";
+          wb.textContent = "● 本机离线（云端小批量降级）";
+        }
+        const tb = $("hud-tunnel-badge");
+        if (tunSt && tunSt.tunnel_online) {
+          tb.className = "badge badge-running";
+          tb.textContent = "预览通道: 就绪";
+        } else {
+          tb.className = "badge badge-stopped";
+          tb.textContent = "预览通道: 离线";
+        }
+      } catch {}
+    }
+
     function openDesktop(url) {
       $("desktop-iframe").src = url || "/desktop/";
       showView("desktop");
+      refreshDesktopHUD();
+      if (hudTimer) clearInterval(hudTimer);
+      hudTimer = setInterval(refreshDesktopHUD, 4000);
     }
 
     $("login-form").addEventListener("submit", async (e) => {
@@ -538,6 +574,16 @@
       $("desktop-iframe").src = "about:blank";
       showView("dashboard");
       await refreshStatus();
+    });
+
+    $("bar-preview").addEventListener("click", () => {
+      const raw = ($("hud-preview-port").value || "").trim();
+      const port = parseInt(raw, 10);
+      if (!port || port < 1 || port > 65535) {
+        alert("请输入本机运行中的开发服务端口号（例如 3000 或 8080）");
+        return;
+      }
+      window.open(`/api/tunnel/proxy/${port}/`, "_blank");
     });
 
     $("bar-newtab").addEventListener("click", () => {

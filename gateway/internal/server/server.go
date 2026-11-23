@@ -15,32 +15,35 @@ import (
 	"super-agent/gateway/internal/execbridge"
 	"super-agent/gateway/internal/proxy"
 	"super-agent/gateway/internal/syncsvc"
+	"super-agent/gateway/internal/tunnel"
 )
 
 //go:embed web/*
 var webFS embed.FS
 
 type Server struct {
-	cfg        *config.Config
-	authMgr    *auth.Manager
-	docker     *docker.Manager
-	proxy      *proxy.VNCProxy
-	syncSvc    *syncsvc.Service
-	execBroker *execbridge.Broker
-	devices    *syncsvc.DeviceRegistry
-	mux        *http.ServeMux
+	cfg          *config.Config
+	authMgr      *auth.Manager
+	docker       *docker.Manager
+	proxy        *proxy.VNCProxy
+	syncSvc      *syncsvc.Service
+	execBroker   *execbridge.Broker
+	tunnelBroker *tunnel.Broker
+	devices      *syncsvc.DeviceRegistry
+	mux          *http.ServeMux
 }
 
-func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker, devices *syncsvc.DeviceRegistry) *Server {
+func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker, tunnelBroker *tunnel.Broker, devices *syncsvc.DeviceRegistry) *Server {
 	s := &Server{
-		cfg:        cfg,
-		authMgr:    authMgr,
-		docker:     dockerMgr,
-		proxy:      vncProxy,
-		syncSvc:    syncSvc,
-		execBroker: execBroker,
-		devices:    devices,
-		mux:        http.NewServeMux(),
+		cfg:          cfg,
+		authMgr:      authMgr,
+		docker:       dockerMgr,
+		proxy:        vncProxy,
+		syncSvc:      syncSvc,
+		execBroker:   execBroker,
+		tunnelBroker: tunnelBroker,
+		devices:      devices,
+		mux:          http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
@@ -66,6 +69,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/desktop/stop", s.requireAuth(s.handleDesktopStop))
 	s.registerSyncRoutes()
 	s.registerExecRoutes()
+	s.registerTunnelRoutes()
 	s.registerPairingRoutes()
 
 	// KasmVNC reverse proxy (all traffic authenticated by HttpOnly JWT cookie)

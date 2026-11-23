@@ -245,6 +245,11 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 		env = append(env, "OPENAI_BASE_URL="+m.cfg.OpenAIBaseURL)
 	}
 
+	workspaceBind := fmt.Sprintf("sa-workspace-%s:/workspace", safeUser)
+	if m.cfg.WorkspaceHostDir != "" {
+		workspaceBind = fmt.Sprintf("%s/%s:/workspace", m.cfg.WorkspaceHostDir, safeUser)
+	}
+
 	req := CreateContainerRequest{
 		Image: m.cfg.DesktopImage,
 		Env:   env,
@@ -254,10 +259,11 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 		},
 		HostConfig: HostConfig{
 			// Separate persistent volumes:
-			// - sa-workspace-<user>: project code (/workspace)
-			// - sa-config-<user>: browser cookies, ~/.claude, ~/.codex, XFCE & IME config (/config)
+			// - workspace: shared host dir (<WORKSPACE_HOST_DIR>/<user>:/workspace) when configured for cloud sync,
+			//   or Docker named volume (sa-workspace-<user>:/workspace) otherwise.
+			// - config: isolated per-user config volume (browser cookies, ~/.claude, ~/.codex, XFCE & IME config).
 			Binds: []string{
-				fmt.Sprintf("sa-workspace-%s:/workspace", safeUser),
+				workspaceBind,
 				fmt.Sprintf("sa-config-%s:/config", safeUser),
 			},
 			Memory:   m.cfg.DesktopMemoryMB * 1024 * 1024,

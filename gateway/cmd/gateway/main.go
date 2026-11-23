@@ -14,6 +14,7 @@ import (
 	"super-agent/gateway/internal/docker"
 	"super-agent/gateway/internal/proxy"
 	"super-agent/gateway/internal/server"
+	"super-agent/gateway/internal/syncsvc"
 )
 
 func main() {
@@ -38,7 +39,9 @@ func main() {
 	authMgr := auth.NewManager(cfg.JWTSecret, cfg.JWTTTL)
 	dockerMgr := docker.NewManager(dockerClient, cfg)
 	vncProxy := proxy.NewVNCProxy(dockerMgr)
-	srv := server.New(cfg, authMgr, dockerMgr, vncProxy)
+	lockMgr := syncsvc.NewLockManager(cfg.SyncLockTTL)
+	syncSvc := syncsvc.NewService(cfg.WorkspaceDataDir, lockMgr)
+	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

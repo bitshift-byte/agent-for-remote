@@ -13,6 +13,7 @@ import (
 	"super-agent/gateway/internal/config"
 	"super-agent/gateway/internal/docker"
 	"super-agent/gateway/internal/proxy"
+	"super-agent/gateway/internal/syncsvc"
 )
 
 //go:embed web/*
@@ -23,15 +24,17 @@ type Server struct {
 	authMgr *auth.Manager
 	docker  *docker.Manager
 	proxy   *proxy.VNCProxy
+	syncSvc *syncsvc.Service
 	mux     *http.ServeMux
 }
 
-func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy) *Server {
+func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service) *Server {
 	s := &Server{
 		cfg:     cfg,
 		authMgr: authMgr,
 		docker:  dockerMgr,
 		proxy:   vncProxy,
+		syncSvc: syncSvc,
 		mux:     http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -56,6 +59,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/desktop/status", s.requireAuth(s.handleDesktopStatus))
 	s.mux.HandleFunc("/api/desktop/start", s.requireAuth(s.handleDesktopStart))
 	s.mux.HandleFunc("/api/desktop/stop", s.requireAuth(s.handleDesktopStop))
+	s.registerSyncRoutes()
 
 	// KasmVNC reverse proxy (all traffic authenticated by HttpOnly JWT cookie)
 	s.mux.HandleFunc("/desktop", s.handleDesktopRedirect)
@@ -114,6 +118,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"username": username,
+		"token":    token,
 	})
 }
 

@@ -271,6 +271,10 @@
           <span>配额规格</span>
           <span id="status-spec">-</span>
         </div>
+        <div class="status-row">
+          <span>同步设备锁</span>
+          <span id="status-sync-lock">未连接</span>
+        </div>
       </div>
 
       <button id="btn-launch" class="btn-primary">启动并进入云桌面</button>
@@ -377,6 +381,14 @@
           badge.textContent = st.state === "not_created" ? "未创建" : "已休眠";
           $("btn-launch").textContent = "启动并进入云桌面";
           $("btn-stop").disabled = true;
+        }
+
+        const lockInfo = await api("/api/sync/lock").catch(() => null);
+        if (lockInfo && lockInfo.locked && lockInfo.lock) {
+          const l = lockInfo.lock;
+          $("status-sync-lock").textContent = `${l.device_name || l.device_id} (${l.os || "unknown"})`;
+        } else {
+          $("status-sync-lock").textContent = "未连接（可绑定）";
         }
       } catch (e) {
         showError("dash-error", e.message);

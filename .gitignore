@@ -5,6 +5,8 @@
 # Build artifacts
 gateway/bin/
 gateway/super-agent-gateway
+sync-agent/bin/
+sync-agent/sync.json
 
 # Local data volumes (if bind-mounted during dev)
 data/

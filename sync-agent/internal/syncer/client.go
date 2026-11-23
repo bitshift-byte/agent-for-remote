@@ -88,6 +88,13 @@ func NewClient(serverURL string) *Client {
 	}
 }
 
+func (c *Client) BaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return c.baseURL
+}
+
 func (c *Client) SetSession(token, deviceID, leaseToken string) {
 	c.token = token
 	c.deviceID = deviceID

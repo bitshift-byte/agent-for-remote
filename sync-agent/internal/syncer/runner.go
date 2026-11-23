@@ -80,6 +80,10 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 			log.Println("[lock] another device took over the workspace lock — sync paused automatically.")
 			return nil
 		}
+		if errors.Is(initialErr, ErrMassDeleteBlocked) {
+			log.Printf("[sync] ⛔ %v", initialErr)
+			return initialErr
+		}
 		log.Printf("[sync] initial pass error: %v", initialErr)
 	} else {
 		log.Println("[sync] initial sync check complete — watching for changes...")
@@ -119,6 +123,10 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 				if errors.Is(passErr, ErrLockLost) {
 					log.Println("[lock] another device took over the workspace lock — sync paused automatically.")
 					return nil
+				}
+				if errors.Is(passErr, ErrMassDeleteBlocked) {
+					log.Printf("[sync] ⛔ %v", passErr)
+					return passErr
 				}
 				log.Printf("[sync] pass error: %v", passErr)
 			}

@@ -64,11 +64,18 @@
   - **测试覆盖**：新增 `TestAES256GCMRoundTripAndTamperDetection` 与 `TestPairCodeKeyWrapAndUnwrap` 单元测试，全量 `go test ./...` 与双平台 sidecar 编译通过。
 
 ### 7. 云端 Ubuntu 桌面样式升级与实时字号/缩放调节
-- **`feat(desktop,gateway)`** `add live font/DPI/theme switcher (sa-display), top bar + bottom dock, and GTK3 polish`
+- **`6892b21`** `feat(desktop,gateway): add live font/DPI/theme switcher, top bar + bottom dock, and GTK3 polish`
   - 新增 `desktop/scripts/sa-display`（桌面「显示与字号设置」快捷方式 + 命令行工具）：基于 `zenity` 提供图形化弹窗与 CLI 参数，支持 **100% / 125% / 150% / 175%** 一键预设、独立微调（DPI、系统字号、桌面图标字号/尺寸、终端字号）以及 **Arc-Dark / Arc 浅色主题** 切换，通过 `xfconf-query` 实时生效，无需重启容器。
   - 升级 `desktop/scripts/init-workspace.sh`（标记升级为 `.sa-theme-v2`）：将默认缩放提升至更舒适的 `115 DPI`（UI `11pt`、桌面图标 `11.5pt`、终端 `12pt`），替换为「顶部半透明细状态栏（Whisker 菜单 + 居中时钟 + 托盘）+ 底部居中自动隐藏 Dock（ChatGPT、Claude、Chrome、终端、显示设置）」布局，并新增 `~/.config/gtk-3.0/gtk.css`（桌面文字阴影、选中圆角高亮、终端内边距、菜单圆角）。
   - 升级 `desktop/Dockerfile` 与 `desktop/scripts/setup-theme.sh`：补充 `fonts-noto-color-emoji`、`xfce4-whiskermenu-plugin`、`zenity` 及 `sa-display.svg` 自定义图标。
   - 升级 `gateway` 与 `.env.example`：新增 `DESKTOP_DPI`、`DESKTOP_FONT_SIZE`、`DESKTOP_THEME` 可选配置并透传至桌面容器。
+
+### 8. 同步防误删安全护栏 + 本地掉线云端降级续跑与 Agent 小批量约束
+- **`feat(sync,exec-bridge,desktop)`** `add mass-deletion sync guardrail and cloud offline fallback with agent small-batch constraints`
+  - **修复同步误删 Bug（`sync-agent`）**：在 `SyncOnce()` 执行任何本地删除前加入预检护栏（`ErrMassDeleteBlocked`）——若云端目录突然变空（原基线 ≥ 3 文件且云端返回 0 文件）或单次请求删除 ≥ 10 个且占比 ≥ 50% 的本地文件，立即拦截并自动暂停同步，绝不静默清空本地仓库；将本地基线路径绑定为 `serverURL|absRoot` 防止跨环境串基线；新增 `/local/reset-baseline` 重置基线接口与 `TestMassDeletionGuardrailBlocksEmptyCloudWipe` 单元测试。
+  - **重连先同步再接管执行**：`sync-agent` 上线/重连后强制先完成初始对账同步（若触发误删护栏或锁丢失则直接中止），确认本地拿到云端离线期间的所有代码变更后再启动 `/api/exec/poll`。
+  - **结构化离线错误码（`gateway`）**：`/api/exec/run` 区分 `503 worker_offline`（本机离线，可安全云端降级）与 `504 job_timeout`（本机执行超时，严禁在云端重跑防非幂等副作用）。
+  - **云端离线降级与 Agent 资源感知（`desktop/scripts/sa-local-sh` & `sa-claude-hook`）**：本机掉线时自动降级在云端 `/bin/bash` 执行，实时读取容器 cgroup CPU/内存配额并写入 `/tmp/sa-runtime-env.json`；首次掉线跃迁注入结构化 `[SUPER-AGENT NOTICE]` 提示 Agent 必须拆分小批量任务，持续离线附带紧凑单行提示，本机重连后发出恢复提示；降级态自动注入低并发环境变量（`GOMAXPROCS=1`、`CARGO_BUILD_JOBS=1`、`MAKEFLAGS=-j1`、`NODE_OPTIONS=--max-old-space-size=2048`）并拦截典型全量重型命令或低内存（`< 1024MB`）执行；为 Claude Code 预置 `PreToolUse` Hook（`sa-claude-hook`）防止长对话遗忘约束。
 
 ---
 

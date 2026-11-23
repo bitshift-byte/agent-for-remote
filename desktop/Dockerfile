@@ -128,15 +128,17 @@ RUN apt-get update \
 COPY scripts/setup-theme.sh /tmp/setup-theme.sh
 RUN chmod +x /tmp/setup-theme.sh && /tmp/setup-theme.sh && rm -f /tmp/setup-theme.sh
 
-# 8. Prepare shared /workspace mount point, launchers, display switcher, transparent local shell wrapper, and s6 init script
+# 8. Prepare shared /workspace mount point, launchers, display switcher, transparent local shell wrapper, Claude hook, and s6 init script
 RUN mkdir -p /workspace /custom-cont-init.d
 COPY scripts/sa-local-sh /usr/local/bin/sa-local-sh
+COPY scripts/sa-claude-hook /usr/local/bin/sa-claude-hook
 COPY scripts/sa-display /usr/local/bin/sa-display
 COPY scripts/super-agent-chatgpt /usr/local/bin/super-agent-chatgpt
 COPY scripts/super-agent-claude-desktop /usr/local/bin/super-agent-claude-desktop
 COPY scripts/init-workspace.sh /custom-cont-init.d/99-super-agent-init.sh
 RUN chmod +x \
     /usr/local/bin/sa-local-sh \
+    /usr/local/bin/sa-claude-hook \
     /usr/local/bin/sa-display \
     /usr/local/bin/super-agent-chatgpt \
     /usr/local/bin/super-agent-claude-desktop \

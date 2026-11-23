@@ -272,3 +272,56 @@ func TestBidirectionalSyncAndDeviceTakeover(t *testing.T) {
 		t.Fatalf("expected Device A heartbeat to fail with ErrLockLost, got %v", err)
 	}
 }
+
+func TestMassDeletionGuardrailBlocksEmptyCloudWipe(t *testing.T) {
+	cloud := &miniSyncServer{root: t.TempDir()}
+	localDir := t.TempDir()
+	ctx := context.Background()
+
+	client := newMiniSyncClient(t, cloud)
+	if _, err := client.Login(ctx, "admin", "admin123"); err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+	if _, err := client.AcquireLock(ctx, "dev-guard", "Guard-Mac", "darwin", false); err != nil {
+		t.Fatalf("acquire failed: %v", err)
+	}
+	eng, err := NewEngine(localDir, client)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	t.Cleanup(func() { _ = eng.ResetBaseline() })
+
+	// Create 6 local files and sync them to cloud
+	files := []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go"}
+	for _, name := range files {
+		_ = os.WriteFile(filepath.Join(localDir, name), []byte("content-"+name), 0o644)
+	}
+	stats, err := eng.SyncOnce(ctx)
+	if err != nil || stats.Pushed != len(files) {
+		t.Fatalf("expected %d pushed, got stats=%+v err=%v", len(files), stats, err)
+	}
+
+	// Normal single-file deletion on cloud should still sync cleanly
+	_ = os.Remove(filepath.Join(cloud.root, "f.go"))
+	stats, err = eng.SyncOnce(ctx)
+	if err != nil || stats.Deleted != 1 {
+		t.Fatalf("expected single cloud delete to sync cleanly, got stats=%+v err=%v", stats, err)
+	}
+	if _, err := os.Stat(filepath.Join(localDir, "f.go")); !os.IsNotExist(err) {
+		t.Fatalf("expected f.go to be deleted locally")
+	}
+
+	// Simulate catastrophic cloud workspace wipe (all remaining 5 files disappear on cloud)
+	for _, name := range files[:5] {
+		_ = os.Remove(filepath.Join(cloud.root, name))
+	}
+	if _, err := eng.SyncOnce(ctx); !errors.Is(err, ErrMassDeleteBlocked) {
+		t.Fatalf("expected ErrMassDeleteBlocked when cloud becomes empty, got %v", err)
+	}
+	// Verify all 5 remaining local files are completely preserved on disk
+	for _, name := range files[:5] {
+		if _, err := os.Stat(filepath.Join(localDir, name)); err != nil {
+			t.Fatalf("guardrail failed: local file %s was deleted!", name)
+		}
+	}
+}

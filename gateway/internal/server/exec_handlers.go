@@ -60,11 +60,18 @@ func (s *Server) handleExecRun(w http.ResponseWriter, r *http.Request, username 
 	res, err := s.execBroker.Submit(r.Context(), username, req.Command, req.Cwd, req.TimeoutSec)
 	if err != nil {
 		code := http.StatusServiceUnavailable
-		if errors.Is(err, execbridge.ErrJobTimeout) {
+		errCode := "exec_unavailable"
+		if errors.Is(err, execbridge.ErrNoActiveWorker) {
+			errCode = "worker_offline"
+		} else if errors.Is(err, execbridge.ErrJobTimeout) {
 			code = http.StatusGatewayTimeout
+			errCode = "job_timeout"
 		}
-		log.Printf("[exec/run] FAILED user=%s err=%v", username, err)
-		writeJSON(w, code, map[string]string{"error": err.Error()})
+		log.Printf("[exec/run] FAILED user=%s code=%s err=%v", username, errCode, err)
+		writeJSON(w, code, map[string]string{
+			"error": err.Error(),
+			"code":  errCode,
+		})
 		return
 	}
 

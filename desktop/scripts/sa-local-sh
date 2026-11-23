@@ -3,17 +3,239 @@
 Super-Agent Transparent Local Shell Wrapper (sa-local-sh)
 Forwards non-interactive `-c "<command>"` calls from cloud AI agents (Claude Code / Codex)
 to the user's connected local machine via the Super-Agent Gateway (with Pre/Post Sync Barriers).
-Interactive shell invocations fall through directly to /bin/bash.
+
+Offline Resilience:
+- If the local machine is offline (HTTP 503 worker_offline or gateway unreachable) and
+  SA_FALLBACK_LOCAL != "0", automatically falls back to executing inside the cloud container
+  while injecting live container resource limits and small-batch execution constraints into
+  the agent's context + /tmp/sa-runtime-env.json.
+- If a command timed out on the local machine (HTTP 504 job_timeout), NEVER re-runs it in the
+  cloud (to avoid double-executing non-idempotent commands).
 """
 import json
 import os
+import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+
+STATE_MODE_FILE = os.environ.get("SA_EXEC_MODE_FILE", "/tmp/sa-exec-mode")
+RUNTIME_ENV_FILE = os.environ.get("SA_RUNTIME_ENV_FILE", "/tmp/sa-runtime-env.json")
+
+HEAVY_CMD_PATTERNS = [
+    (re.compile(r"\bdocker\s+(build|buildx|compose\s+up)\b", re.I), "docker 构建/编排"),
+    (re.compile(r"\bcargo\s+(build|test)\b.*(--release|--workspace|--all-targets)", re.I), "Rust 全量/Release 编译或测试"),
+    (re.compile(r"\b(npm|pnpm|yarn)\s+(run\s+)?build\b", re.I), "前端全量打包构建"),
+    (re.compile(r"\b(mvn|./mvnw|gradle|./gradlew)\s+.*(package|install|build)\b", re.I), "JVM 全量构建"),
+    (re.compile(r"\bgo\s+test\s+\./\.\.\.(?:\s|$)"), "Go 全仓库测试 (./...)"),
+    (re.compile(r"^\s*pytest\s*$"), "全目录 pytest 测试"),
+]
 
 
 def exec_local_bash():
     os.execv("/bin/bash", ["/bin/bash"] + sys.argv[1:])
+
+
+def read_int_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+        if raw.isdigit():
+            return int(raw)
+    except Exception:
+        pass
+    return None
+
+
+def read_container_resources():
+    cpus = os.cpu_count() or 2
+    # Check cgroup v2 cpu.max if available
+    try:
+        with open("/sys/fs/cgroup/cpu.max", "r", encoding="utf-8") as f:
+            parts = f.read().strip().split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit() and int(parts[1]) > 0:
+                quota_cpus = max(1, int(round(int(parts[0]) / float(parts[1]))))
+                cpus = min(cpus, quota_cpus)
+    except Exception:
+        pass
+
+    mem_limit_bytes = read_int_file("/sys/fs/cgroup/memory.max")
+    mem_curr_bytes = read_int_file("/sys/fs/cgroup/memory.current")
+    if mem_limit_bytes is None:
+        mem_limit_bytes = read_int_file("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        mem_curr_bytes = read_int_file("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+
+    # Sanity cap if cgroup reports unlimited (~8EiB)
+    if mem_limit_bytes is not None and mem_limit_bytes > (1 << 50):
+        mem_limit_bytes = None
+
+    mem_limit_mb = int(mem_limit_bytes // (1024 * 1024)) if mem_limit_bytes else 0
+    mem_avail_mb = 0
+    if mem_limit_bytes and mem_curr_bytes is not None:
+        mem_avail_mb = max(0, int((mem_limit_bytes - mem_curr_bytes) // (1024 * 1024)))
+    else:
+        # Fallback to /proc/meminfo on Linux
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                info = {}
+                for line in f:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        nums = v.strip().split()
+                        if nums and nums[0].isdigit():
+                            info[k.strip()] = int(nums[0]) // 1024  # kB -> MB
+                if mem_limit_mb == 0:
+                    mem_limit_mb = info.get("MemTotal", 0)
+                mem_avail_mb = info.get("MemAvailable", info.get("MemFree", 0))
+        except Exception:
+            pass
+
+    return {
+        "cpu_cores": cpus,
+        "mem_limit_mb": mem_limit_mb,
+        "mem_avail_mb": mem_avail_mb,
+    }
+
+
+def load_prev_mode():
+    try:
+        with open(STATE_MODE_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "local"
+
+
+def save_runtime_state(mode, res):
+    prev_env = {}
+    try:
+        with open(RUNTIME_ENV_FILE, "r", encoding="utf-8") as f:
+            prev_env = json.load(f)
+    except Exception:
+        prev_env = {}
+
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    offline_since = prev_env.get("offline_since", "")
+    if mode == "cloud_fallback":
+        if not offline_since or prev_env.get("mode") != "cloud_fallback":
+            offline_since = now_iso
+    else:
+        offline_since = ""
+
+    payload = {
+        "mode": mode,
+        "cpu_cores": res["cpu_cores"],
+        "mem_limit_mb": res["mem_limit_mb"],
+        "mem_avail_mb": res["mem_avail_mb"],
+        "updated_at": now_iso,
+        "offline_since": offline_since,
+        "constraints": (
+            "本地机器已掉线，当前在受限云端容器执行：禁止运行超限重型任务，必须拆分为小批量（单模块/单文件、低并发）执行。"
+            if mode == "cloud_fallback"
+            else ""
+        ),
+    }
+    try:
+        with open(STATE_MODE_FILE, "w", encoding="utf-8") as f:
+            f.write(mode)
+    except Exception:
+        pass
+    try:
+        with open(RUNTIME_ENV_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def detect_heavy_command(cmd):
+    for pat, label in HEAVY_CMD_PATTERNS:
+        if pat.search(cmd):
+            return label
+    return None
+
+
+def format_resource_summary(res):
+    limit_str = f"{res['mem_limit_mb']}MB" if res["mem_limit_mb"] > 0 else "未知"
+    avail_str = f"{res['mem_avail_mb']}MB" if res["mem_avail_mb"] > 0 else "未知"
+    return f"CPU={res['cpu_cores']}核, 内存上限={limit_str}, 当前可用={avail_str}"
+
+
+def build_offline_transition_notice(res):
+    return (
+        "\n[SUPER-AGENT NOTICE: EXECUTION ENVIRONMENT CHANGED -> CLOUD CONTAINER]\n"
+        "本地机器已掉线，当前命令已自动降级在云端容器内执行（代码保存在 /workspace，本地机器重新上线后会自动同步回本机）。\n"
+        f"当前云端容器硬件配额：{format_resource_summary(res)}\n"
+        "【强制约束】请立即调整后续任务策略：\n"
+        "1. 禁止运行超过当前云端机器大小限制的重型任务（如全量构建、全仓库测试、Docker 构建、高并发编译）。\n"
+        "2. 必须将构建、测试、批处理任务拆分为小批量（例如单文件/单包测试，并限制并发度如 -j1 / --maxWorkers=1）。\n"
+        "3. 优先在云端完成代码编写、静态检查与轻量单测，重型全量任务留待本地机器重新上线后执行。\n"
+    )
+
+
+def run_cloud_fallback(cmd, reason):
+    res = read_container_resources()
+    prev_mode = load_prev_mode()
+    save_runtime_state("cloud_fallback", res)
+
+    allow_heavy = os.environ.get("SA_ALLOW_HEAVY_IN_CLOUD", "0") == "1"
+    min_free_mb = int(os.environ.get("SA_CLOUD_MIN_FREE_MEM_MB", "1024"))
+    timeout_sec = int(os.environ.get("SA_CLOUD_FALLBACK_TIMEOUT_SEC", "60"))
+
+    if not allow_heavy:
+        heavy_label = detect_heavy_command(cmd)
+        if heavy_label:
+            sys.stderr.write(build_offline_transition_notice(res))
+            sys.stderr.write(
+                f"[SUPER-AGENT GUARDRAIL] 已拦截云端重型任务（命中：{heavy_label}）。\n"
+                "请将该任务拆分为小批量后重试（例如改为单包/单文件测试，如 `go test ./internal/pkg`、`pytest tests/test_one.py`），"
+                "或等待本地机器重新上线后再运行全量任务。（如需强制执行可设置 SA_ALLOW_HEAVY_IN_CLOUD=1）\n"
+            )
+            sys.exit(126)
+
+        if res["mem_avail_mb"] > 0 and res["mem_avail_mb"] < min_free_mb:
+            sys.stderr.write(build_offline_transition_notice(res))
+            sys.stderr.write(
+                f"[SUPER-AGENT GUARDRAIL] 当前云端容器可用内存仅剩 {res['mem_avail_mb']}MB（低于安全阈值 {min_free_mb}MB），已拒绝执行新命令以防容器 OOM。\n"
+                "请先清理占用或等待本地机器重新上线后再继续。\n"
+            )
+            sys.exit(126)
+
+    # Inject conservative concurrency limits for cloud fallback subprocess
+    env = os.environ.copy()
+    env.setdefault("GOMAXPROCS", "1")
+    env.setdefault("CARGO_BUILD_JOBS", "1")
+    env.setdefault("MAKEFLAGS", "-j1")
+    env.setdefault("NODE_OPTIONS", "--max-old-space-size=2048")
+    env["SA_EXEC_MODE"] = "cloud_fallback"
+
+    try:
+        proc = subprocess.run(
+            ["/bin/bash", "-c", cmd],
+            env=env,
+            timeout=timeout_sec,
+        )
+        exit_code = proc.returncode
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(
+            f"\n[SUPER-AGENT GUARDRAIL] 云端降级执行超时（>{timeout_sec}s）。"
+            "当前处于本地掉线降级模式，请将该任务拆分为更小批量后重试。\n"
+        )
+        exit_code = 124
+
+    # Emit Agent guidance notice
+    if prev_mode != "cloud_fallback":
+        sys.stderr.write(build_offline_transition_notice(res))
+    elif res["mem_avail_mb"] > 0 and res["mem_avail_mb"] < 1500:
+        sys.stderr.write(
+            f"\n[SA: CLOUD_FALLBACK | 低内存预警: {format_resource_summary(res)} | 请务必保持小批量任务]\n"
+        )
+    else:
+        sys.stderr.write(
+            f"\n[SA: CLOUD_FALLBACK ({reason}) | {format_resource_summary(res)} | 保持小批量执行]\n"
+        )
+    sys.stderr.flush()
+    sys.exit(exit_code)
 
 
 def main():
@@ -37,6 +259,8 @@ def main():
     if cmd is None:
         exec_local_bash()
 
+    fallback_enabled = os.environ.get("SA_FALLBACK_LOCAL", "1") != "0"
+
     payload = json.dumps({
         "command": cmd,
         "cwd": os.getcwd(),
@@ -56,6 +280,13 @@ def main():
     try:
         with urllib.request.urlopen(req, timeout=140) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+            prev_mode = load_prev_mode()
+            if prev_mode == "cloud_fallback":
+                save_runtime_state("local", read_container_resources())
+                sys.stderr.write(
+                    "\n[SUPER-AGENT NOTICE: LOCAL MACHINE RECONNECTED]\n"
+                    "本地机器已重新上线，云端 /workspace 改动已同步回本机，执行环境已切回本机，可恢复正常任务。\n"
+                )
             if data.get("stdout"):
                 sys.stdout.write(data["stdout"])
                 sys.stdout.flush()
@@ -64,10 +295,30 @@ def main():
                 sys.stderr.flush()
             sys.exit(int(data.get("exit_code", 0)))
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        sys.stderr.write(f"[sa-local-sh] local execution unavailable ({e.code}): {body}\n")
+        raw_body = e.read().decode("utf-8", errors="replace")
+        err_code = ""
+        try:
+            err_code = json.loads(raw_body).get("code", "")
+        except Exception:
+            pass
+
+        # 504 job_timeout: command already dispatched to local machine — NEVER re-run in cloud!
+        if e.code == 504 or err_code == "job_timeout":
+            sys.stderr.write(
+                f"[sa-local-sh] 本地机器执行超时（504 job_timeout）：{raw_body}\n"
+                "为防止非幂等命令被重复执行，不会自动在云端重跑；请先确认状态后再决定是否重试。\n"
+            )
+            sys.exit(124)
+
+        # 503 worker_offline: safe to fall back to cloud container execution
+        if fallback_enabled and (e.code == 503 or err_code == "worker_offline"):
+            run_cloud_fallback(cmd, "local_offline")
+
+        sys.stderr.write(f"[sa-local-sh] local execution unavailable ({e.code}): {raw_body}\n")
         sys.exit(125)
     except Exception as e:
+        if fallback_enabled:
+            run_cloud_fallback(cmd, "gateway_unreachable")
         sys.stderr.write(f"[sa-local-sh] gateway connection error: {e}\n")
         sys.exit(125)
 

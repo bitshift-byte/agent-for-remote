@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""
+Super-Agent Claude Code PreToolUse Hook (sa-claude-hook)
+Reads /tmp/sa-runtime-env.json written by sa-local-sh. When the local machine is offline
+and execution has fallen back to the constrained cloud container, injects live hardware
+limits and small-batch constraints into Claude Code's tool context.
+"""
+import json
+import os
+import sys
+
+RUNTIME_ENV_FILE = os.environ.get("SA_RUNTIME_ENV_FILE", "/tmp/sa-runtime-env.json")
+
+
+def main():
+    try:
+        with open(RUNTIME_ENV_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception:
+        sys.exit(0)
+
+    if state.get("mode") != "cloud_fallback":
+        sys.exit(0)
+
+    cpus = state.get("cpu_cores", 2)
+    limit_mb = state.get("mem_limit_mb", 0)
+    avail_mb = state.get("mem_avail_mb", 0)
+    limit_str = f"{limit_mb}MB" if limit_mb else "受限"
+    avail_str = f"{avail_mb}MB" if avail_mb else "受限"
+
+    msg = (
+        f"[Super-Agent 环境提示] 本地机器当前离线，命令正在云端容器内降级执行"
+        f"（CPU={cpus}核，内存上限={limit_str}，当前可用={avail_str}）。"
+        "请勿运行超出机器大小限制的重型全量任务，务必将构建、测试、数据处理拆分为小批量并降低并发度；"
+        "写入 /workspace 的代码会在本地机器重新上线后自动同步回本机。"
+    )
+
+    out = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(out, ensure_ascii=False))
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

@@ -418,5 +418,29 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
+# Seed Claude Code PreToolUse hook (only if settings.json does not exist yet) so Claude Code
+# automatically receives cloud container resource limits & small-batch reminders when local machine is offline.
+CLAUDE_DIR="${USER_HOME}/.claude"
+mkdir -p "${CLAUDE_DIR}"
+if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
+  cat <<'EOF' > "${CLAUDE_DIR}/settings.json"
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/sa-claude-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+fi
+
 chmod +x "${DESKTOP_DIR}"/*.desktop
-chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${USER_HOME}/.sa-theme-v2" || true
+chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${CLAUDE_DIR}" "${USER_HOME}/.sa-theme-v2" || true

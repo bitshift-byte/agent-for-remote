@@ -25,6 +25,12 @@ const (
 	maxFileSize    = 64 * 1024 * 1024
 )
 
+var (
+	// ErrMassDeleteBlocked is returned when the cloud workspace appears wiped or requests deleting
+	// a dangerously large portion of local files in a single pass.
+	ErrMassDeleteBlocked = errors.New("mass local deletion blocked by safety guardrail")
+)
+
 type DeviceIdentity struct {
 	DeviceID   string `json:"device_id"`
 	DeviceName string `json:"device_name"`
@@ -45,6 +51,7 @@ type SyncStats struct {
 
 type Engine struct {
 	rootDir      string
+	serverScope  string
 	client       *Client
 	ignore       *IgnoreMatcher
 	baseline     map[string]FileEntry
@@ -61,8 +68,14 @@ func NewEngine(rootDir string, client *Client) (*Engine, error) {
 		return nil, err
 	}
 
+	serverScope := ""
+	if client != nil {
+		serverScope = strings.TrimRight(strings.TrimSpace(client.BaseURL()), "/")
+	}
+
 	e := &Engine{
 		rootDir:      absRoot,
+		serverScope:  serverScope,
 		client:       client,
 		ignore:       LoadIgnoreMatcher(absRoot),
 		baseline:     make(map[string]FileEntry),
@@ -83,15 +96,31 @@ func appConfigDir() string {
 	return ""
 }
 
-func stateFilePath(absRoot string) string {
+func stateFilePath(serverScope, absRoot string) string {
 	if cfgDir := appConfigDir(); cfgDir != "" {
 		stateDir := filepath.Join(cfgDir, "state")
 		if os.MkdirAll(stateDir, 0o700) == nil {
-			sum := sha256.Sum256([]byte(absRoot))
+			key := absRoot
+			if serverScope != "" {
+				key = serverScope + "|" + absRoot
+			}
+			sum := sha256.Sum256([]byte(key))
 			return filepath.Join(stateDir, hex.EncodeToString(sum[:8])+".json")
 		}
 	}
 	return filepath.Join(absRoot, stateFileName)
+}
+
+// ResetBaseline clears the local sync baseline for this directory+server so local files
+// are treated as fresh and pushed cleanly to an empty/reset cloud workspace.
+func (e *Engine) ResetBaseline() error {
+	e.baseline = make(map[string]FileEntry)
+	e.baselineDirs = make(map[string]bool)
+	e.hashCache = make(map[string]FileEntry)
+	if err := os.Remove(stateFilePath(e.serverScope, e.rootDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func LoadOrCreateDeviceIdentity(rootDir, customName string) (*DeviceIdentity, error) {
@@ -185,6 +214,23 @@ func (e *Engine) SyncOnce(ctx context.Context) (SyncStats, error) {
 	localFiles, localDirs, err := e.scanLocal()
 	if err != nil {
 		return stats, err
+	}
+
+	// Safety Guardrail: pre-check pending local deletions BEFORE mutating anything on disk.
+	// Prevents an empty/reset cloud workspace (or accidental `rm -rf /workspace/*`) from wiping the local repo.
+	pendingLocalDeletes := 0
+	for rel, loc := range localFiles {
+		if _, hasRemote := manifest.Files[rel]; !hasRemote {
+			if base, hasBase := e.baseline[rel]; hasBase && loc.SHA256 == base.SHA256 {
+				pendingLocalDeletes++
+			}
+		}
+	}
+	if len(e.baseline) >= 3 && len(localFiles) >= 3 && len(manifest.Files) == 0 && pendingLocalDeletes >= 3 {
+		return stats, fmt.Errorf("%w: cloud workspace became empty while local has %d files (would delete %d files); sync paused to protect local repo", ErrMassDeleteBlocked, len(localFiles), pendingLocalDeletes)
+	}
+	if pendingLocalDeletes >= 10 && pendingLocalDeletes*2 >= len(localFiles) {
+		return stats, fmt.Errorf("%w: cloud requested deleting %d/%d local files in one pass; sync paused to protect local repo", ErrMassDeleteBlocked, pendingLocalDeletes, len(localFiles))
 	}
 
 	remoteDirs := make(map[string]bool, len(manifest.Dirs))
@@ -498,7 +544,7 @@ func (e *Engine) scanLocal() (map[string]FileEntry, map[string]bool, error) {
 }
 
 func (e *Engine) loadState() {
-	raw, err := os.ReadFile(stateFilePath(e.rootDir))
+	raw, err := os.ReadFile(stateFilePath(e.serverScope, e.rootDir))
 	if err != nil {
 		return
 	}
@@ -523,7 +569,7 @@ func (e *Engine) saveState() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(stateFilePath(e.rootDir), raw, 0o600)
+	_ = os.WriteFile(stateFilePath(e.serverScope, e.rootDir), raw, 0o600)
 }
 
 func hashFile(path string) (string, error) {

@@ -428,9 +428,22 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
 
+	// Reconnect Sync-Before-Exec: reconcile all cloud changes locally BEFORE registering as an active exec worker.
 	syncMu.Lock()
-	_ = runSyncPass(workerCtx, engine)
+	initErr := runSyncPass(workerCtx, engine)
 	syncMu.Unlock()
+	if initErr != nil {
+		if errors.Is(initErr, ErrLockLost) {
+			c.setError("lock_lost", "同步权已被其他设备接管，本机已自动暂停", nil)
+			return
+		}
+		if errors.Is(initErr, ErrMassDeleteBlocked) {
+			log.Printf("[sync] ⛔ %v", initErr)
+			c.setError("error", "⚠️ 已拦截云端批量删除本地文件（云端目录可能被清空或重置），同步已自动暂停保护本地代码："+initErr.Error(), nil)
+			return
+		}
+		log.Printf("[sync] initial reconnect sync warning: %v", initErr)
+	}
 
 	go RunExecLoop(workerCtx, client, engine, &syncMu, func() {
 		log.Println("[lock] another device took over — paused automatically")
@@ -466,6 +479,11 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 			if err != nil {
 				if errors.Is(err, ErrLockLost) {
 					c.setError("lock_lost", "同步权已被其他设备接管，本机已自动暂停", nil)
+					return
+				}
+				if errors.Is(err, ErrMassDeleteBlocked) {
+					log.Printf("[sync] ⛔ %v", err)
+					c.setError("error", "⚠️ 已拦截云端批量删除本地文件（云端目录可能被清空或重置），同步已自动暂停保护本地代码："+err.Error(), nil)
 					return
 				}
 				log.Printf("[sync] pass error: %v", err)
@@ -559,6 +577,24 @@ func (c *Controller) ServeControlAPI(addr string) error {
 			return
 		}
 		c.Stop()
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
+	mux.HandleFunc("/local/reset-baseline", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		c.Stop()
+		c.mu.Lock()
+		dir := c.cfg.Dir
+		srv := c.cfg.Server
+		c.mu.Unlock()
+		if dir != "" {
+			if abs, err := filepath.Abs(dir); err == nil {
+				_ = os.Remove(stateFilePath(strings.TrimRight(strings.TrimSpace(srv), "/"), abs))
+			}
+		}
+		log.Printf("[sync] reset local sync baseline for %s (server=%s)", dir, srv)
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
 

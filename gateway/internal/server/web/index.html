@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Super-Agent 云端工作区</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #131a2e;
+      --panel-border: #233052;
+      --text: #e6ecf8;
+      --muted: #93a3c7;
+      --accent: #4f7cff;
+      --accent-hover: #3d68e6;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .hidden { display: none !important; }
+
+    /* Centered card layout for login & dashboard */
+    .center-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: radial-gradient(circle at top, #182342 0%, #0b1020 65%);
+    }
+
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .brand-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .subtitle {
+      margin: 0 0 24px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 11px 13px;
+      border-radius: 10px;
+      border: 1px solid var(--panel-border);
+      background: #0d1326;
+      color: var(--text);
+      font-size: 14px;
+      margin-bottom: 16px;
+      outline: none;
+    }
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 11px 16px;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary {
+      background: #1e2947;
+      color: var(--text);
+      border: 1px solid var(--panel-border);
+    }
+    .btn-secondary:hover:not(:disabled) { background: #27355b; }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.14);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.25); }
+
+    .error-msg {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .status-box {
+      background: #0d1326;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      padding: 5px 0;
+    }
+    .status-row span:first-child { color: var(--muted); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge-running { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+    .badge-stopped { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+    .badge-starting { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+
+    .actions-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .actions-row button { flex: 1; }
+
+    /* Loading overlay */
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(79, 124, 255, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Fullscreen desktop workspace view */
+    .desktop-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+    }
+    .topbar {
+      height: 44px;
+      background: #0e1529;
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    .topbar-left, .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar button {
+      padding: 5px 10px;
+      font-size: 12px;
+      border-radius: 7px;
+    }
+    .desktop-frame {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+  <!-- Login View -->
+  <div id="view-login" class="center-wrap hidden">
+    <div class="card">
+      <div class="brand">
+        <div class="brand-dot"></div>
+        <h1>Super-Agent 云桌面</h1>
+      </div>
+      <p class="subtitle">浏览器直连海外 Ubuntu 工作区，内置 Claude Code、Codex、Chrome 与中文输入法。</p>
+      <div id="login-error" class="error-msg hidden"></div>
+      <form id="login-form">
+        <label for="username">账号</label>
+        <input id="username" type="text" autocomplete="username" placeholder="例如 admin" required />
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
+        <button id="login-btn" type="submit" class="btn-primary">登录工作区</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dashboard / Wake View -->
+  <div id="view-dashboard" class="center-wrap hidden">
+    <div class="card">
+      <div class="brand">
+        <div class="brand-dot"></div>
+        <h1>工作区控制台</h1>
+      </div>
+      <p class="subtitle">当前用户：<strong id="dash-user"></strong></p>
+
+      <div id="dash-error" class="error-msg hidden"></div>
+
+      <div id="waking-panel" class="status-box hidden" style="text-align:center; padding: 28px 16px;">
+        <div class="spinner"></div>
+        <div style="font-weight:500; margin-bottom:6px;">正在唤醒云端工作区...</div>
+        <div style="font-size:12px; color:var(--muted);">首次启动容器约需 10–25 秒，就绪后将自动进入桌面</div>
+      </div>
+
+      <div id="status-panel" class="status-box">
+        <div class="status-row">
+          <span>桌面状态</span>
+          <span id="status-badge" class="badge badge-stopped">检查中</span>
+        </div>
+        <div class="status-row">
+          <span>容器实例</span>
+          <span id="status-container">-</span>
+        </div>
+        <div class="status-row">
+          <span>配额规格</span>
+          <span id="status-spec">-</span>
+        </div>
+      </div>
+
+      <button id="btn-launch" class="btn-primary">启动并进入云桌面</button>
+      <div class="actions-row">
+        <button id="btn-stop" class="btn-danger">停止容器</button>
+        <button id="btn-logout" class="btn-secondary">退出登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen KasmVNC Desktop View -->
+  <div id="view-desktop" class="desktop-shell hidden">
+    <div class="topbar">
+      <div class="topbar-left">
+        <span class="brand-dot" style="width:9px;height:9px;"></span>
+        <strong>Super-Agent</strong>
+        <span style="color:var(--muted);" id="bar-user"></span>
+      </div>
+      <div class="topbar-right">
+        <button id="bar-newtab" class="btn-secondary">新标签页全屏</button>
+        <button id="bar-back" class="btn-secondary">返回控制台</button>
+        <button id="bar-stop" class="btn-danger">停止释放</button>
+      </div>
+    </div>
+    <iframe id="desktop-iframe" class="desktop-frame" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    let currentUser = null;
+
+    function showView(name) {
+      $("view-login").classList.toggle("hidden", name !== "login");
+      $("view-dashboard").classList.toggle("hidden", name !== "dashboard");
+      $("view-desktop").classList.toggle("hidden", name !== "desktop");
+    }
+
+    function showError(elId, msg) {
+      const el = $(elId);
+      if (!msg) {
+        el.classList.add("hidden");
+        el.textContent = "";
+      } else {
+        el.textContent = msg;
+        el.classList.remove("hidden");
+      }
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+        ...opts,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || `请求失败 (${res.status})`);
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    }
+
+    async function init() {
+      try {
+        const me = await api("/api/me");
+        currentUser = me.username;
+        $("dash-user").textContent = currentUser;
+        $("bar-user").textContent = `(${currentUser})`;
+        showView("dashboard");
+        await refreshStatus();
+      } catch {
+        showView("login");
+      }
+    }
+
+    async function refreshStatus() {
+      showError("dash-error", "");
+      try {
+        const st = await api("/api/desktop/status");
+        $("status-container").textContent = st.container_name;
+        $("status-spec").textContent = `${st.cpus} vCPU / ${Math.round(st.memory_mb / 1024 * 10) / 10} GB RAM`;
+
+        const badge = $("status-badge");
+        badge.className = "badge";
+        if (st.state === "running" && st.ready) {
+          badge.classList.add("badge-running");
+          badge.textContent = "运行中";
+          $("btn-launch").textContent = "进入云桌面";
+          $("btn-stop").disabled = false;
+        } else if (st.state === "running") {
+          badge.classList.add("badge-starting");
+          badge.textContent = "启动中";
+          $("btn-launch").textContent = "等待并进入云桌面";
+          $("btn-stop").disabled = false;
+        } else if (st.state === "paused") {
+          badge.classList.add("badge-starting");
+          badge.textContent = "已挂起";
+          $("btn-launch").textContent = "唤醒并进入云桌面";
+          $("btn-stop").disabled = false;
+        } else {
+          badge.classList.add("badge-stopped");
+          badge.textContent = st.state === "not_created" ? "未创建" : "已休眠";
+          $("btn-launch").textContent = "启动并进入云桌面";
+          $("btn-stop").disabled = true;
+        }
+      } catch (e) {
+        showError("dash-error", e.message);
+      }
+    }
+
+    function openDesktop(url) {
+      $("desktop-iframe").src = url || "/desktop/";
+      showView("desktop");
+    }
+
+    $("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      showError("login-error", "");
+      $("login-btn").disabled = true;
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            username: $("username").value.trim(),
+            password: $("password").value,
+          }),
+        });
+        currentUser = data.username;
+        $("dash-user").textContent = currentUser;
+        $("bar-user").textContent = `(${currentUser})`;
+        showView("dashboard");
+        await refreshStatus();
+      } catch (err) {
+        showError("login-error", err.message);
+      } finally {
+        $("login-btn").disabled = false;
+      }
+    });
+
+    $("btn-launch").addEventListener("click", async () => {
+      showError("dash-error", "");
+      $("btn-launch").disabled = true;
+      $("btn-stop").disabled = true;
+      $("status-panel").classList.add("hidden");
+      $("waking-panel").classList.remove("hidden");
+      try {
+        const st = await api("/api/desktop/start", { method: "POST" });
+        openDesktop(st.desktop_url);
+      } catch (err) {
+        showError("dash-error", "唤醒失败：" + err.message);
+        await refreshStatus();
+      } finally {
+        $("waking-panel").classList.add("hidden");
+        $("status-panel").classList.remove("hidden");
+        $("btn-launch").disabled = false;
+      }
+    });
+
+    async function stopDesktop() {
+      showError("dash-error", "");
+      $("btn-stop").disabled = true;
+      try {
+        await api("/api/desktop/stop", { method: "POST" });
+        $("desktop-iframe").src = "about:blank";
+        showView("dashboard");
+        await refreshStatus();
+      } catch (err) {
+        showView("dashboard");
+        showError("dash-error", "停止失败：" + err.message);
+      }
+    }
+
+    $("btn-stop").addEventListener("click", stopDesktop);
+    $("bar-stop").addEventListener("click", stopDesktop);
+
+    $("bar-back").addEventListener("click", async () => {
+      $("desktop-iframe").src = "about:blank";
+      showView("dashboard");
+      await refreshStatus();
+    });
+
+    $("bar-newtab").addEventListener("click", () => {
+      window.open("/desktop/", "_blank");
+    });
+
+    $("btn-logout").addEventListener("click", async () => {
+      await api("/api/logout", { method: "POST" }).catch(() => {});
+      currentUser = null;
+      $("desktop-iframe").src = "about:blank";
+      showView("login");
+    });
+
+    init();
+  </script>
+</body>
+</html>

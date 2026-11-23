@@ -1,0 +1,132 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	Port            string
+	JWTSecret       string
+	JWTTTL          time.Duration
+	CookieSecure    bool
+	Users           map[string]string
+	DockerHost      string
+	DockerNetwork   string
+	DesktopImage    string
+	DesktopMemoryMB int64
+	DesktopCPUs     float64
+	DesktopShmMB    int64
+	DesktopTZ       string
+	StartTimeout    time.Duration
+
+	// Runtime AI provider env vars injected into user containers (never written to /workspace)
+	AnthropicAPIKey  string
+	AnthropicBaseURL string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+}
+
+func Load() (*Config, error) {
+	port := getEnv("GATEWAY_PORT", "8080")
+	jwtSecret := getEnv("JWT_SECRET", "dev-insecure-secret-change-in-production")
+	ttlHours := getEnvInt("JWT_TTL_HOURS", 24)
+	cookieSecure := getEnvBool("COOKIE_SECURE", false)
+
+	users, err := parseUsers(getEnv("AUTH_USERS", "admin:admin123,demo:demo123"))
+	if err != nil {
+		return nil, err
+	}
+
+	dockerHost := getEnv("DOCKER_HOST", "unix:///var/run/docker.sock")
+	if legacy := os.Getenv("DOCKER_SOCKET"); legacy != "" && os.Getenv("DOCKER_HOST") == "" {
+		dockerHost = "unix://" + legacy
+	}
+
+	cfg := &Config{
+		Port:             port,
+		JWTSecret:        jwtSecret,
+		JWTTTL:           time.Duration(ttlHours) * time.Hour,
+		CookieSecure:     cookieSecure,
+		Users:            users,
+		DockerHost:       dockerHost,
+		DockerNetwork:    getEnv("DOCKER_NETWORK", "super-agent-net"),
+		DesktopImage:     getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
+		DesktopMemoryMB:  int64(getEnvInt("DESKTOP_MEMORY_MB", 4096)),
+		DesktopCPUs:      getEnvFloat("DESKTOP_CPUS", 2.0),
+		DesktopShmMB:     int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
+		DesktopTZ:        getEnv("DESKTOP_TZ", "Asia/Shanghai"),
+		StartTimeout:     time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
+		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
+	}
+
+	return cfg, nil
+}
+
+func parseUsers(raw string) (map[string]string, error) {
+	users := make(map[string]string)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ":", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] == "" {
+			return nil, fmt.Errorf("invalid AUTH_USERS entry %q (expected username:password)", entry)
+		}
+		users[strings.TrimSpace(parts[0])] = parts[1]
+	}
+	if len(users) == 0 {
+		return nil, fmt.Errorf("AUTH_USERS must contain at least one user")
+	}
+	return users, nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return fallback
+	}
+	return f
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
+}

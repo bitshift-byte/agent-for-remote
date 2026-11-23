@@ -1,0 +1,16 @@
+# Environment & secrets
+.env
+*.local
+
+# Build artifacts
+gateway/bin/
+gateway/super-agent-gateway
+
+# Local data volumes (if bind-mounted during dev)
+data/
+
+# OS & editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp

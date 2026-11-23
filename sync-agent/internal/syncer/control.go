@@ -553,6 +553,14 @@ func (c *Controller) ServeControlAPI(addr string) error {
 		_ = c.Start(false)
 	}
 
+	// Auto-exit when parent tray app terminates (prevents orphaned zombie processes on Ctrl+C / crash)
+	go func() {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		log.Println("[tray] parent process closed stdin — exiting sync-agent")
+		c.Stop()
+		os.Exit(0)
+	}()
+
 	log.Printf("[tray] sync-agent local control API listening on http://%s", addr)
 	return http.ListenAndServe(addr, mux)
 }
@@ -562,6 +570,7 @@ func (c *Controller) withCORS(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

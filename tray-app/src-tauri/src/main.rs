@@ -67,7 +67,7 @@ fn main() {
         .setup(|app| {
             // Spawn bundled Go sync-agent sidecar in local control API mode (non-fatal if already running)
             match app.shell().sidecar("sync-agent") {
-                Ok(cmd) => match cmd.args(["-serve", "-addr", "localhost:17890"]).spawn() {
+                Ok(cmd) => match cmd.args(["-serve", "-addr", ":17890"]).spawn() {
                     Ok((mut rx, child)) => {
                         if let Some(state) = app.try_state::<SidecarState>() {
                             if let Ok(mut guard) = state.0.lock() {

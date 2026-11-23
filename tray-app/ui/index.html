@@ -26,6 +26,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: 13px;
     }
+    .hidden { display: none !important; }
     .app { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 100vh; }
     .header { display: flex; align-items: center; justify-content: space-between; }
     .brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
@@ -38,15 +39,13 @@
     .badge.starting { background: rgba(245,158,11,0.16); color: #fcd34d; }
     .badge.conflict, .badge.lock_lost, .badge.error { background: rgba(239,68,68,0.16); color: #fca5a5; }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    .field.full { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
     label { color: var(--muted); font-size: 12px; }
-    input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0c1326; color: var(--text); font-size: 13px; outline: none; }
+    input { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0c1326; color: var(--text); font-size: 13px; outline: none; }
     input:focus { border-color: var(--accent); }
     .dir-row { display: flex; gap: 8px; }
     .dir-row input { flex: 1; }
-    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     button { border: none; border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 500; cursor: pointer; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: #fff; }
@@ -55,8 +54,7 @@
     .btn-warn { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4); }
     .btn-danger { background: rgba(239,68,68,0.16); color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
     .alert { border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #fca5a5; }
-    .alert.hidden { display: none; }
-    .meta-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 3px 0; }
+    .meta-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 4px 0; }
     .meta-row strong { color: var(--text); font-weight: 500; }
     .logs { background: #080d1a; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.55; color: #cbd5e1; height: 170px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
   </style>
@@ -73,49 +71,70 @@
 
     <div id="alert-box" class="alert hidden"></div>
 
-    <div class="card">
-      <div class="meta-row">
-        <span>当前设备</span>
-        <strong id="meta-device">-</strong>
+    <!-- Unbound View: Zero-password 6-char Pairing Code Onboarding -->
+    <div id="view-pair" class="card">
+      <div style="font-weight:600;margin-bottom:6px;">绑定云端工作区（免密配对）</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px;">
+        1. 在浏览器打开云桌面控制台，点击「生成 6 位配对码」并复制绑定口令<br/>
+        2. 粘贴到下方并选择本地项目目录，点「立即绑定」即可自动开始同步
       </div>
-      <div class="meta-row">
-        <span>单活设备锁</span>
-        <strong id="meta-lock">未持有</strong>
+
+      <div class="field">
+        <label for="pair-input">绑定口令（super-agent://pair?...）或 6 位配对码（如 K7M-4Q9）</label>
+        <input id="pair-input" type="text" placeholder="直接粘贴网页复制的绑定口令，或输入 6 位配对码" />
+      </div>
+      <div class="field">
+        <label for="pair-server">云端网关地址（若粘贴完整绑定口令可留空自动识别）</label>
+        <input id="pair-server" type="text" placeholder="http://localhost:8080" />
+      </div>
+      <div class="field">
+        <label for="pair-dir">本地同步仓库目录</label>
+        <div class="dir-row">
+          <input id="pair-dir" type="text" placeholder="请选择本地项目文件夹" />
+          <button id="btn-pick-pair" type="button" class="btn-secondary">选择文件夹…</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="pair-device">本机名称</label>
+        <input id="pair-device" type="text" placeholder="例如 My-MacBook" />
+      </div>
+      <div class="btn-row">
+        <button id="btn-bind" class="btn-primary">立即绑定并启动同步</button>
       </div>
     </div>
 
-    <div class="card">
-      <div class="grid">
-        <div class="field full">
-          <label for="server">云端网关地址</label>
-          <input id="server" type="text" placeholder="https://desktop.example.com 或 http://localhost:8080" />
+    <!-- Bound View: Status + Switch Folder + Lock Control -->
+    <div id="view-bound" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="card">
+        <div class="meta-row">
+          <span>已绑定账号</span>
+          <strong id="meta-account">-</strong>
         </div>
-        <div class="field">
-          <label for="username">账号</label>
-          <input id="username" type="text" placeholder="admin" />
+        <div class="meta-row">
+          <span>当前设备</span>
+          <strong id="meta-device">-</strong>
         </div>
-        <div class="field">
-          <label for="access-code">登录密码（留空保持已保存）</label>
-          <input id="access-code" type="password" placeholder="••••••" />
-        </div>
-        <div class="field full">
-          <label for="dir">本地同步仓库目录（AI 命令也将锁定在此目录执行）</label>
-          <div class="dir-row">
-            <input id="dir" type="text" placeholder="请选择本地项目文件夹" />
-            <button id="btn-pick" type="button" class="btn-secondary">选择文件夹…</button>
-          </div>
-        </div>
-        <div class="field full">
-          <label for="device-name">设备名称</label>
-          <input id="device-name" type="text" placeholder="例如 My-MacBook" />
+        <div class="meta-row">
+          <span>单活设备锁</span>
+          <strong id="meta-lock">未持有</strong>
         </div>
       </div>
 
-      <div class="btn-row">
-        <button id="btn-save-start" class="btn-primary">保存并启动同步</button>
-        <button id="btn-stop" class="btn-danger">停止同步</button>
-        <button id="btn-takeover" class="btn-warn" style="display:none;">强制接管设备锁</button>
-        <button id="btn-open-web" class="btn-secondary">打开云桌面</button>
+      <div class="card">
+        <div class="field">
+          <label for="bound-dir">当前同步仓库目录（AI 命令将锁定在此目录执行）</label>
+          <div class="dir-row">
+            <input id="bound-dir" type="text" placeholder="请选择本地项目文件夹" />
+            <button id="btn-pick-bound" type="button" class="btn-secondary">切换文件夹…</button>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button id="btn-start" class="btn-primary">启动同步</button>
+          <button id="btn-stop" class="btn-danger">停止同步</button>
+          <button id="btn-takeover" class="btn-warn hidden">强制接管设备锁</button>
+          <button id="btn-open-web" class="btn-secondary">打开云桌面</button>
+          <button id="btn-unbind" class="btn-secondary">解绑本机</button>
+        </div>
       </div>
     </div>
 

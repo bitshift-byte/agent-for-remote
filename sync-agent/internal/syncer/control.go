@@ -17,17 +17,19 @@ import (
 )
 
 type LocalConfig struct {
-	Server     string `json:"server"`
-	Username   string `json:"username"`
-	Token      string `json:"token"`
-	Dir        string `json:"dir"`
-	DeviceName string `json:"device_name"`
-	IntervalMs int    `json:"interval_ms"`
+	Server      string `json:"server"`
+	Username    string `json:"username"`
+	DeviceToken string `json:"device_token,omitempty"`
+	Token       string `json:"token,omitempty"`
+	Dir         string `json:"dir"`
+	DeviceName  string `json:"device_name"`
+	IntervalMs  int    `json:"interval_ms"`
 }
 
 type StatusSnapshot struct {
 	State      string      `json:"state"` // "stopped", "starting", "running", "conflict", "lock_lost", "error"
 	Running    bool        `json:"running"`
+	Bound      bool        `json:"bound"`
 	LastError  string      `json:"last_error,omitempty"`
 	LockedBy   *DeviceLock `json:"locked_by,omitempty"`
 	Epoch      int64       `json:"epoch,omitempty"`
@@ -105,7 +107,6 @@ func NewController() *Controller {
 		logs:    ring,
 		cfg: LocalConfig{
 			Server:     "http://localhost:8080",
-			Username:   "admin",
 			IntervalMs: 800,
 		},
 	}
@@ -132,6 +133,9 @@ func (c *Controller) loadConfig() {
 		}
 		if loaded.Username != "" {
 			c.cfg.Username = loaded.Username
+		}
+		if loaded.DeviceToken != "" {
+			c.cfg.DeviceToken = loaded.DeviceToken
 		}
 		if loaded.Token != "" {
 			c.cfg.Token = loaded.Token
@@ -171,21 +175,85 @@ func (c *Controller) Status() StatusSnapshot {
 		cp := *c.lockedBy
 		lockedCopy = &cp
 	}
+	bound := c.cfg.DeviceToken != "" || c.cfg.Token != ""
 	return StatusSnapshot{
 		State:      c.state,
 		Running:    c.state == "running" || c.state == "starting",
+		Bound:      bound,
 		LastError:  c.lastError,
 		LockedBy:   lockedCopy,
 		Epoch:      c.epoch,
 		Server:     c.cfg.Server,
 		Username:   c.cfg.Username,
-		HasToken:   c.cfg.Token != "",
+		HasToken:   bound,
 		Dir:        c.cfg.Dir,
 		DeviceName: c.cfg.DeviceName,
 		DeviceID:   devID,
 		OS:         devOS,
 		Logs:       c.logs.Snapshot(),
 	}
+}
+
+func (c *Controller) Pair(input, fallbackServer, dir, deviceName string) error {
+	serverURL, code, err := ParseBindInput(input, fallbackServer)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	if strings.TrimSpace(deviceName) != "" && c.identity != nil {
+		c.identity.DeviceName = strings.TrimSpace(deviceName)
+	}
+	id := c.identity
+	c.mu.Unlock()
+	if id == nil {
+		return errors.New("device identity not initialized")
+	}
+
+	client := NewClient(serverURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	claimed, err := client.ClaimPairingCode(ctx, code, id.DeviceID, id.DeviceName, id.OS)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	c.cfg.Server = serverURL
+	c.cfg.Username = claimed.Username
+	c.cfg.DeviceToken = claimed.DeviceToken
+	c.cfg.Token = "" // Clear any legacy password once bound via DeviceToken
+	if strings.TrimSpace(dir) != "" {
+		c.cfg.Dir = strings.TrimSpace(dir)
+	}
+	if strings.TrimSpace(deviceName) != "" {
+		c.cfg.DeviceName = strings.TrimSpace(deviceName)
+	}
+	err = c.saveConfigLocked()
+	hasDir := c.cfg.Dir != ""
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("[pair] bound device %q to account %q on %s", id.DeviceName, claimed.Username, serverURL)
+	if hasDir {
+		return c.Start(false)
+	}
+	return nil
+}
+
+func (c *Controller) Unbind() error {
+	c.Stop()
+	c.mu.Lock()
+	c.cfg.DeviceToken = ""
+	c.cfg.Token = ""
+	c.cfg.Username = ""
+	err := c.saveConfigLocked()
+	c.mu.Unlock()
+	log.Println("[pair] unbound local device")
+	return err
 }
 
 func (c *Controller) UpdateConfig(next LocalConfig) error {
@@ -251,9 +319,9 @@ func (c *Controller) Start(force bool) error {
 
 	c.mu.Lock()
 	cfg := c.cfg
-	if cfg.Server == "" || cfg.Username == "" || cfg.Token == "" || cfg.Dir == "" {
+	if cfg.Server == "" || (cfg.DeviceToken == "" && (cfg.Username == "" || cfg.Token == "")) || cfg.Dir == "" {
 		c.state = "error"
-		c.lastError = "请先配置服务器地址、账号密码和本地同步仓库目录"
+		c.lastError = "请先完成 6 位配对码绑定并选择本地仓库目录"
 		c.mu.Unlock()
 		return errors.New(c.lastError)
 	}
@@ -284,17 +352,26 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 	}
 
 	client := NewClient(cfg.Server)
-	if _, err := client.Login(ctx, cfg.Username, cfg.Token); err != nil {
-		c.setError("error", fmt.Sprintf("登录失败: %v", err), nil)
-		return
+	if cfg.DeviceToken != "" {
+		client.SetSession(cfg.DeviceToken, id.DeviceID, "")
+		log.Printf("[tray] authenticating with bound device token for %s on %s", cfg.Username, cfg.Server)
+	} else {
+		if _, err := client.Login(ctx, cfg.Username, cfg.Token); err != nil {
+			c.setError("error", fmt.Sprintf("登录失败: %v", err), nil)
+			return
+		}
+		log.Printf("[tray] logged in as %s on %s", cfg.Username, cfg.Server)
 	}
-	log.Printf("[tray] logged in as %s on %s", cfg.Username, cfg.Server)
 
 	acq, err := client.AcquireLock(ctx, id.DeviceID, id.DeviceName, id.OS, force)
 	if err != nil {
 		var conflictErr *LockConflictError
 		if errors.As(err, &conflictErr) {
 			c.setError("conflict", "另一台设备正在同步，请确认是否接管", conflictErr.LockedBy)
+			return
+		}
+		if strings.Contains(err.Error(), "401") {
+			c.setError("error", "设备凭证已失效或已在网页端解绑，请重新输入 6 位配对码绑定", nil)
 			return
 		}
 		c.setError("error", fmt.Sprintf("获取设备锁失败: %v", err), nil)
@@ -396,6 +473,35 @@ func (c *Controller) ServeControlAPI(addr string) error {
 	mux.HandleFunc("/local/status", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
+	mux.HandleFunc("/local/pair", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			Input      string `json:"input"`
+			Server     string `json:"server"`
+			Dir        string `json:"dir"`
+			DeviceName string `json:"device_name"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		if err := c.Pair(req.Input, req.Server, req.Dir, req.DeviceName); err != nil {
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
+	mux.HandleFunc("/local/unbind", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		_ = c.Unbind()
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
 	mux.HandleFunc("/local/config", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			writeLocalJSON(w, http.StatusOK, c.Status())
@@ -440,9 +546,9 @@ func (c *Controller) ServeControlAPI(addr string) error {
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
 
-	// Auto-start on boot if a valid config was previously saved
+	// Auto-start on boot if already bound and directory is configured
 	st := c.Status()
-	if st.Server != "" && st.Username != "" && st.HasToken && st.Dir != "" {
+	if st.Server != "" && st.Bound && st.Dir != "" {
 		log.Printf("[tray] auto-starting saved workspace sync: %s", st.Dir)
 		_ = c.Start(false)
 	}

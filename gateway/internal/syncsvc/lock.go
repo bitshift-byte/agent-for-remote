@@ -183,6 +183,15 @@ func (lm *LockManager) Release(username, deviceID, leaseToken string) bool {
 	return false
 }
 
+// ForceReleaseDevice releases the active lock if currently held by deviceID (used when revoking a bound device).
+func (lm *LockManager) ForceReleaseDevice(username, deviceID string) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	if cur, ok := lm.locks[username]; ok && cur.DeviceID == deviceID {
+		delete(lm.locks, username)
+	}
+}
+
 func generateLeaseToken() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)

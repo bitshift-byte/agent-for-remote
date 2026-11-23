@@ -282,6 +282,21 @@
         <button id="btn-stop" class="btn-danger">停止容器</button>
         <button id="btn-logout" class="btn-secondary">退出登录</button>
       </div>
+
+      <!-- Bind Local Machine (6-char Pairing Code) -->
+      <div class="status-box" style="margin-top:18px; margin-bottom:0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <strong style="font-size:13px;">本机伴侣绑定（Mac / Windows）</strong>
+          <button id="btn-gen-code" class="btn-secondary" style="padding:5px 10px;font-size:12px;">生成 6 位配对码</button>
+        </div>
+        <div id="pair-box" class="hidden" style="background:#080d1a;border:1px dashed var(--accent);border-radius:10px;padding:12px;text-align:center;margin-bottom:10px;">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">在本机 Super-Agent 托盘应用中输入或粘贴（5 分钟内有效）</div>
+          <div id="pair-code-display" style="font-size:26px;font-weight:700;letter-spacing:4px;color:#93c5fd;margin:6px 0;">---</div>
+          <button id="btn-copy-bind" class="btn-primary" style="width:auto;padding:6px 14px;font-size:12px;margin-top:4px;">一键复制绑定口令（含网关地址）</button>
+          <div id="pair-copy-hint" style="font-size:11px;color:#86efac;margin-top:6px;min-height:14px;"></div>
+        </div>
+        <div id="bound-devices-list" style="font-size:12px;color:var(--muted);">暂无已绑定设备</div>
+      </div>
     </div>
   </div>
 
@@ -390,10 +405,69 @@
         } else {
           $("status-sync-lock").textContent = "未连接（可绑定）";
         }
+        await refreshDevices();
       } catch (e) {
         showError("dash-error", e.message);
       }
     }
+
+    let lastBindString = "";
+
+    async function refreshDevices() {
+      const box = $("bound-devices-list");
+      try {
+        const res = await api("/api/devices");
+        const list = res.devices || [];
+        const activeID = res.active_lock ? res.active_lock.device_id : "";
+        if (list.length === 0) {
+          box.innerHTML = `<span style="color:var(--muted);">暂无已绑定设备，点击右上角生成配对码即可绑定本机。</span>`;
+          return;
+        }
+        box.innerHTML = list.map((d) => {
+          const isActive = d.device_id === activeID;
+          const badge = isActive ? `<span style="color:#86efac;margin-left:6px;">● 同步中</span>` : "";
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
+            <div><strong style="color:var(--text);">${escapeHTML(d.device_name || d.device_id)}</strong> <span style="color:var(--muted);">(${escapeHTML(d.os || "-")})</span>${badge}</div>
+            <button data-revoke="${escapeHTML(d.device_id)}" class="btn-danger" style="padding:3px 9px;font-size:11px;">解绑</button>
+          </div>`;
+        }).join("");
+        box.querySelectorAll("[data-revoke]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-revoke");
+            await api("/api/devices?device_id=" + encodeURIComponent(id), { method: "DELETE" });
+            await refreshStatus();
+          });
+        });
+      } catch {
+        box.textContent = "无法加载已绑定设备列表";
+      }
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+    }
+
+    $("btn-gen-code").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/devices/pair/create", { method: "POST" });
+        lastBindString = data.bind_string || data.code;
+        $("pair-code-display").textContent = data.code;
+        $("pair-copy-hint").textContent = "";
+        $("pair-box").classList.remove("hidden");
+      } catch (err) {
+        showError("dash-error", "生成配对码失败：" + err.message);
+      }
+    });
+
+    $("btn-copy-bind").addEventListener("click", async () => {
+      if (!lastBindString) return;
+      try {
+        await navigator.clipboard.writeText(lastBindString);
+        $("pair-copy-hint").textContent = "已复制！去本机 Super-Agent 托盘应用直接粘贴即可完成绑定";
+      } catch {
+        prompt("请手动复制下方绑定口令：", lastBindString);
+      }
+    });
 
     function openDesktop(url) {
       $("desktop-iframe").src = url || "/desktop/";

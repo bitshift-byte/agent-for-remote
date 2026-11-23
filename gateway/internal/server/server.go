@@ -27,10 +27,11 @@ type Server struct {
 	proxy      *proxy.VNCProxy
 	syncSvc    *syncsvc.Service
 	execBroker *execbridge.Broker
+	devices    *syncsvc.DeviceRegistry
 	mux        *http.ServeMux
 }
 
-func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker) *Server {
+func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker, devices *syncsvc.DeviceRegistry) *Server {
 	s := &Server{
 		cfg:        cfg,
 		authMgr:    authMgr,
@@ -38,6 +39,7 @@ func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, v
 		proxy:      vncProxy,
 		syncSvc:    syncSvc,
 		execBroker: execBroker,
+		devices:    devices,
 		mux:        http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -64,6 +66,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/desktop/stop", s.requireAuth(s.handleDesktopStop))
 	s.registerSyncRoutes()
 	s.registerExecRoutes()
+	s.registerPairingRoutes()
 
 	// KasmVNC reverse proxy (all traffic authenticated by HttpOnly JWT cookie)
 	s.mux.HandleFunc("/desktop", s.handleDesktopRedirect)
@@ -214,6 +217,15 @@ func (s *Server) requireAuth(next authedHandler) http.HandlerFunc {
 				return
 			}
 			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+
+		if strings.HasPrefix(token, "dev_") && s.devices != nil {
+			if user, _, ok := s.devices.VerifyDeviceToken(token); ok {
+				next(w, r, user)
+				return
+			}
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "device token revoked or invalid"})
 			return
 		}
 

@@ -45,7 +45,8 @@ func main() {
 	lockMgr := syncsvc.NewLockManager(cfg.SyncLockTTL)
 	syncSvc := syncsvc.NewService(cfg.WorkspaceDataDir, lockMgr)
 	execBroker := execbridge.NewBroker()
-	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker)
+	devices := syncsvc.NewDeviceRegistry(cfg.WorkspaceDataDir)
+	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker, devices)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

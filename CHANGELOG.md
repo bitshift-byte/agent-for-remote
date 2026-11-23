@@ -63,6 +63,13 @@
   - **远程执行载荷加密**：云端下发的执行任务与本机回传的 stdout/stderr/退出码均以 AES-256-GCM 加密传输（AAD 分别为 `exec-job` / `exec-result`）。
   - **测试覆盖**：新增 `TestAES256GCMRoundTripAndTamperDetection` 与 `TestPairCodeKeyWrapAndUnwrap` 单元测试，全量 `go test ./...` 与双平台 sidecar 编译通过。
 
+### 7. 云端 Ubuntu 桌面样式升级与实时字号/缩放调节
+- **`feat(desktop,gateway)`** `add live font/DPI/theme switcher (sa-display), top bar + bottom dock, and GTK3 polish`
+  - 新增 `desktop/scripts/sa-display`（桌面「显示与字号设置」快捷方式 + 命令行工具）：基于 `zenity` 提供图形化弹窗与 CLI 参数，支持 **100% / 125% / 150% / 175%** 一键预设、独立微调（DPI、系统字号、桌面图标字号/尺寸、终端字号）以及 **Arc-Dark / Arc 浅色主题** 切换，通过 `xfconf-query` 实时生效，无需重启容器。
+  - 升级 `desktop/scripts/init-workspace.sh`（标记升级为 `.sa-theme-v2`）：将默认缩放提升至更舒适的 `115 DPI`（UI `11pt`、桌面图标 `11.5pt`、终端 `12pt`），替换为「顶部半透明细状态栏（Whisker 菜单 + 居中时钟 + 托盘）+ 底部居中自动隐藏 Dock（ChatGPT、Claude、Chrome、终端、显示设置）」布局，并新增 `~/.config/gtk-3.0/gtk.css`（桌面文字阴影、选中圆角高亮、终端内边距、菜单圆角）。
+  - 升级 `desktop/Dockerfile` 与 `desktop/scripts/setup-theme.sh`：补充 `fonts-noto-color-emoji`、`xfce4-whiskermenu-plugin`、`zenity` 及 `sa-display.svg` 自定义图标。
+  - 升级 `gateway` 与 `.env.example`：新增 `DESKTOP_DPI`、`DESKTOP_FONT_SIZE`、`DESKTOP_THEME` 可选配置并透传至桌面容器。
+
 ---
 
 ## 二、配置变更清单（Configuration Changes）
@@ -81,6 +88,7 @@
 | `DESKTOP_MEMORY_MB` | `e092f20` → `0331b5f` | `4096` → **`6144`** | 集成官方桌面应用后，推荐内存上限提升至 6144 MB |
 | `DESKTOP_CPUS` / `DESKTOP_SHM_MB` | `e092f20` | `2` / `2048` | 桌面容器 CPU 核数与 `/dev/shm` 大小 |
 | `DESKTOP_TZ` / `DESKTOP_START_TIMEOUT_SEC` | `e092f20` | `Asia/Shanghai` / `60` | 容器时区与启动健康检查超时 |
+| `DESKTOP_DPI` / `DESKTOP_FONT_SIZE` / `DESKTOP_THEME` | 桌面样式 v2 | 空（容器默认 `115` / `11` / `dark`） | 可选，预设新建桌面容器的初始缩放 DPI、UI 字号和深浅主题（容器内仍可随时用 `sa-display` 实时修改） |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`（及 `*_BASE_URL`） | `e092f20` | 空（可选） | 透传至云端桌面容器的 CLI 模型密钥与自定义端点 |
 | `MOCK_DESKTOP` | `a589164` | `false` | 无 Docker 本机调试开关 |
 | `WORKSPACE_DATA_DIR` | `940f36f` | `/data/workspaces` | 网关侧持久化用户工作区及设备元数据目录 |
@@ -97,6 +105,7 @@
 | `SA_EXEC_TIMEOUT_SEC` | `93006a2` | 容器运行时（可选覆盖） | 单次本地命令转发超时时间，默认 `120` 秒 |
 | `CLAUDE_DESKTOP_DEB_URL` | `0331b5f` | `docker build --build-arg` | 可选，构建时下载并安装 Claude Linux 官方 `.deb` 包 |
 | `CHATGPT_DESKTOP_DEB_URL` | `0331b5f` | `docker build --build-arg` | 可选，构建时下载并安装 ChatGPT Linux 官方 `.deb` 包 |
+| `DESKTOP_DPI` / `DESKTOP_FONT_SIZE` / `DESKTOP_THEME` | 桌面样式 v2 | 容器运行时（可选透传） | 控制首次初始化时的 DPI、系统字号与主题，并在 `~/.config/super-agent/display.env` 持久化 |
 
 ### 3. 本地 `sync-agent`、托盘应用与网关持久化配置变动
 

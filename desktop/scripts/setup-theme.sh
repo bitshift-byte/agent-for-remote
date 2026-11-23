@@ -89,4 +89,21 @@ cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-claude.svg
 </svg>
 EOF
 
+# 4. Clean SVG icon for Display & Font Settings shortcut
+cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-display.svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4f7cff"/>
+      <stop offset="100%" stop-color="#3b5bdb"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#g3)"/>
+  <rect x="24" y="28" width="80" height="54" rx="10" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <line x1="48" y1="96" x2="80" y2="96" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <line x1="64" y1="82" x2="64" y2="96" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <text x="64" y="65" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="28" font-weight="700">Aa</text>
+</svg>
+EOF
+
 gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true

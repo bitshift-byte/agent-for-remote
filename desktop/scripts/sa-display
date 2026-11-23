@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${HOME}/.config/super-agent"
+STATE_FILE="${CONFIG_DIR}/display.env"
+TERM_RC="${HOME}/.config/xfce4/terminal/terminalrc"
+
+mkdir -p "${CONFIG_DIR}" "$(dirname "${TERM_RC}")"
+
+# Load persisted values or defaults
+DPI="${DESKTOP_DPI:-115}"
+UI_FONT="${DESKTOP_FONT_SIZE:-11}"
+ICON_FONT="${DESKTOP_ICON_FONT_SIZE:-11.5}"
+TERM_FONT="${DESKTOP_TERM_FONT_SIZE:-12}"
+ICON_SIZE="${DESKTOP_ICON_SIZE:-56}"
+THEME="${DESKTOP_THEME:-dark}"
+
+if [ -f "${STATE_FILE}" ]; then
+  # shellcheck disable=SC1090
+  source "${STATE_FILE}" || true
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: sa-display [OPTIONS]
+
+Without arguments, opens a graphical display, font size, and theme dialog.
+
+Options:
+  --preset <standard|comfortable|large|xlarge>  Apply a scaling preset
+  --dpi <72..240>                               Set Xft DPI (e.g. 96, 115, 136, 156)
+  --font <8..20>                                Set UI & titlebar font size (pt)
+  --icon-font <8..22>                           Set desktop icon label font size (pt)
+  --term-font <9..24>                           Set terminal font size (pt)
+  --icon-size <32..96>                          Set desktop icon pixel size
+  --theme <dark|light>                          Switch between Arc-Dark and Arc light theme
+  --status                                      Show current saved settings
+  -h, --help                                    Show this help
+EOF
+}
+
+is_num() {
+  [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]
+}
+
+is_int() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+apply_preset() {
+  case "$1" in
+    standard|100)
+      DPI=96; UI_FONT=10; ICON_FONT=10.5; TERM_FONT=11; ICON_SIZE=48
+      ;;
+    comfortable|125)
+      DPI=115; UI_FONT=11; ICON_FONT=11.5; TERM_FONT=12; ICON_SIZE=56
+      ;;
+    large|150)
+      DPI=136; UI_FONT=12; ICON_FONT=12.5; TERM_FONT=13; ICON_SIZE=64
+      ;;
+    xlarge|175)
+      DPI=156; UI_FONT=13; ICON_FONT=13.5; TERM_FONT=14; ICON_SIZE=72
+      ;;
+    *)
+      echo "Unknown preset: $1 (use standard, comfortable, large, or xlarge)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+update_terminal_rc() {
+  local font_size="$1"
+  local theme_mode="$2"
+  local fg="#e6ecf8"
+  local bg="#0b1020"
+  local cursor="#4f7cff"
+
+  if [ "${theme_mode}" = "light" ]; then
+    fg="#1e293b"
+    bg="#f8fafc"
+    cursor="#2563eb"
+  fi
+
+  if [ ! -f "${TERM_RC}" ]; then
+    cat <<EOF > "${TERM_RC}"
+[Configuration]
+FontName=JetBrains Mono ${font_size}
+ColorForeground=${fg}
+ColorBackground=${bg}
+ColorCursor=${cursor}
+ColorPalette=#1e293b;#f87171;#4ade80;#facc15;#60a5fa;#c084fc;#22d3ee;#e2e8f0;#475569;#fca5a5;#86efac;#fde047;#93c5fd;#d8b4fe;#67e8f9;#f8fafc
+MiscMenubarDefault=FALSE
+MiscBordersDefault=FALSE
+ScrollingLines=10000
+EOF
+    return
+  fi
+
+  python3 - "${TERM_RC}" "${font_size}" "${fg}" "${bg}" "${cursor}" <<'PY'
+import sys, pathlib
+
+rc_path, font_size, fg, bg, cursor = sys.argv[1:6]
+p = pathlib.Path(rc_path)
+lines = p.read_text(encoding="utf-8").splitlines()
+
+updates = {
+    "FontName": f"JetBrains Mono {font_size}",
+    "ColorForeground": fg,
+    "ColorBackground": bg,
+    "ColorCursor": cursor,
+}
+seen = set()
+out = []
+for line in lines:
+    if "=" in line and not line.lstrip().startswith("#"):
+        k = line.split("=", 1)[0].strip()
+        if k in updates:
+            out.append(f"{k}={updates[k]}")
+            seen.add(k)
+            continue
+    out.append(line)
+
+for k, v in updates.items():
+    if k not in seen:
+        out.append(f"{k}={v}")
+
+p.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+}
+
+apply_settings() {
+  local gtk_theme="Arc-Dark"
+  local icon_theme="Papirus-Dark"
+  if [ "${THEME}" = "light" ]; then
+    gtk_theme="Arc"
+    icon_theme="Papirus-Light"
+  fi
+
+  cat <<EOF > "${STATE_FILE}"
+DPI=${DPI}
+UI_FONT=${UI_FONT}
+ICON_FONT=${ICON_FONT}
+TERM_FONT=${TERM_FONT}
+ICON_SIZE=${ICON_SIZE}
+THEME=${THEME}
+EOF
+
+  update_terminal_rc "${TERM_FONT}" "${THEME}"
+
+  if command -v xfconf-query >/dev/null 2>&1; then
+    xfconf-query -c xsettings -p /Xft/DPI -n -t int -s "${DPI}" || true
+    xfconf-query -c xsettings -p /Gtk/FontName -n -t string -s "Noto Sans CJK SC ${UI_FONT}" || true
+    xfconf-query -c xsettings -p /Gtk/MonospaceFontName -n -t string -s "JetBrains Mono ${UI_FONT}" || true
+    xfconf-query -c xsettings -p /Net/ThemeName -n -t string -s "${gtk_theme}" || true
+    xfconf-query -c xsettings -p /Net/IconThemeName -n -t string -s "${icon_theme}" || true
+
+    xfconf-query -c xfwm4 -p /general/title_font -n -t string -s "Noto Sans CJK SC Medium ${UI_FONT}" || true
+    xfconf-query -c xfwm4 -p /general/theme -n -t string -s "${gtk_theme}" || true
+
+    xfconf-query -c xfce4-desktop -p /desktop-icons/use-custom-font-size -n -t bool -s true || true
+    xfconf-query -c xfce4-desktop -p /desktop-icons/font-size -n -t double -s "${ICON_FONT}" || true
+    xfconf-query -c xfce4-desktop -p /desktop-icons/icon-size -n -t uint -s "${ICON_SIZE}" || true
+  fi
+}
+
+run_gui() {
+  if ! command -v zenity >/dev/null 2>&1 || [ -z "${DISPLAY:-}" ]; then
+    echo "Current display settings:"
+    echo "  DPI=${DPI}, UI_FONT=${UI_FONT}pt, ICON_FONT=${ICON_FONT}pt, TERM_FONT=${TERM_FONT}pt, ICON_SIZE=${ICON_SIZE}px, THEME=${THEME}"
+    echo "Run 'sa-display --help' for CLI options."
+    exit 0
+  fi
+
+  local choice
+  choice="$(zenity --list \
+    --title="显示与字号设置 (Super-Agent)" \
+    --text="当前：DPI ${DPI} · 系统 ${UI_FONT}pt · 桌面 ${ICON_FONT}pt · 终端 ${TERM_FONT}pt · 图标 ${ICON_SIZE}px · 主题 ${THEME}\n选择预设或自定义项后立即生效，无需重启容器：" \
+    --width=560 --height=380 \
+    --column="选项" --column="名称" --column="详细参数" \
+    --hide-column=1 --print-column=1 \
+    "standard"    "标准 100%"            "96 DPI · UI 10pt · 桌面 10.5pt · 终端 11pt · 图标 48px" \
+    "comfortable" "舒适 125%（推荐）"     "115 DPI · UI 11pt · 桌面 11.5pt · 终端 12pt · 图标 56px" \
+    "large"       "大字号 150%"          "136 DPI · UI 12pt · 桌面 12.5pt · 终端 13pt · 图标 64px" \
+    "xlarge"      "超大字号 175%"        "156 DPI · UI 13pt · 桌面 13.5pt · 终端 14pt · 图标 72px" \
+    "custom"      "自定义字号与 DPI…"     "分别调整 DPI、系统字号、桌面图标字号、终端字号与图标尺寸" \
+    "theme-dark"  "切换为深色主题"        "Arc-Dark + Papirus-Dark（护眼暗色）" \
+    "theme-light" "切换为浅色主题"        "Arc + Papirus-Light（明亮浅色）" \
+  )" || exit 0
+
+  case "${choice}" in
+    standard|comfortable|large|xlarge)
+      apply_preset "${choice}"
+      apply_settings
+      ;;
+    theme-dark)
+      THEME="dark"
+      apply_settings
+      ;;
+    theme-light)
+      THEME="light"
+      apply_settings
+      ;;
+    custom)
+      local form_out
+      form_out="$(zenity --forms \
+        --title="自定义字号与缩放" \
+        --text="留空则保持当前值（当前：DPI=${DPI}, UI=${UI_FONT}, 桌面=${ICON_FONT}, 终端=${TERM_FONT}, 图标=${ICON_SIZE}）：" \
+        --width=460 \
+        --separator="|" \
+        --add-entry="DPI 缩放 (72-240，当前 ${DPI})" \
+        --add-entry="系统 UI 字号 pt (8-20，当前 ${UI_FONT})" \
+        --add-entry="桌面图标字号 pt (8-22，当前 ${ICON_FONT})" \
+        --add-entry="终端字号 pt (9-24，当前 ${TERM_FONT})" \
+        --add-entry="桌面图标尺寸 px (32-96，当前 ${ICON_SIZE})" \
+      )" || exit 0
+
+      IFS='|' read -r new_dpi new_ui new_icon_font new_term new_icon_size <<< "${form_out}"
+      if [ -n "${new_dpi}" ] && is_int "${new_dpi}"; then DPI="${new_dpi}"; fi
+      if [ -n "${new_ui}" ] && is_num "${new_ui}"; then UI_FONT="${new_ui}"; fi
+      if [ -n "${new_icon_font}" ] && is_num "${new_icon_font}"; then ICON_FONT="${new_icon_font}"; fi
+      if [ -n "${new_term}" ] && is_num "${new_term}"; then TERM_FONT="${new_term}"; fi
+      if [ -n "${new_icon_size}" ] && is_int "${new_icon_size}"; then ICON_SIZE="${new_icon_size}"; fi
+      apply_settings
+      ;;
+    *)
+      exit 0
+      ;;
+  esac
+
+  zenity --info \
+    --title="已应用显示设置" \
+    --width=380 \
+    --text="已生效：\nDPI ${DPI} · 系统 ${UI_FONT}pt · 桌面 ${ICON_FONT}pt · 终端 ${TERM_FONT}pt · 图标 ${ICON_SIZE}px · 主题 ${THEME}\n\n（新打开的终端窗口会自动使用新终端字号。）" || true
+}
+
+if [ $# -eq 0 ]; then
+  run_gui
+  exit 0
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --preset)
+      apply_preset "${2:-}"
+      shift 2
+      ;;
+    --dpi)
+      if ! is_int "${2:-}"; then echo "Invalid --dpi: ${2:-}" >&2; exit 1; fi
+      DPI="$2"
+      shift 2
+      ;;
+    --font)
+      if ! is_num "${2:-}"; then echo "Invalid --font: ${2:-}" >&2; exit 1; fi
+      UI_FONT="$2"
+      shift 2
+      ;;
+    --icon-font)
+      if ! is_num "${2:-}"; then echo "Invalid --icon-font: ${2:-}" >&2; exit 1; fi
+      ICON_FONT="$2"
+      shift 2
+      ;;
+    --term-font)
+      if ! is_num "${2:-}"; then echo "Invalid --term-font: ${2:-}" >&2; exit 1; fi
+      TERM_FONT="$2"
+      shift 2
+      ;;
+    --icon-size)
+      if ! is_int "${2:-}"; then echo "Invalid --icon-size: ${2:-}" >&2; exit 1; fi
+      ICON_SIZE="$2"
+      shift 2
+      ;;
+    --theme)
+      if [ "${2:-}" != "dark" ] && [ "${2:-}" != "light" ]; then
+        echo "Invalid --theme: ${2:-} (use dark or light)" >&2; exit 1
+      fi
+      THEME="$2"
+      shift 2
+      ;;
+    --status)
+      echo "DPI=${DPI}"
+      echo "UI_FONT=${UI_FONT}"
+      echo "ICON_FONT=${ICON_FONT}"
+      echo "TERM_FONT=${TERM_FONT}"
+      echo "ICON_SIZE=${ICON_SIZE}"
+      echo "THEME=${THEME}"
+      exit 0
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+apply_settings
+echo "Applied display settings: DPI=${DPI}, UI=${UI_FONT}pt, Desktop=${ICON_FONT}pt, Terminal=${TERM_FONT}pt, IconSize=${ICON_SIZE}px, Theme=${THEME}"

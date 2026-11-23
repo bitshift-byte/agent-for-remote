@@ -253,6 +253,15 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 	if m.cfg.OpenAIBaseURL != "" {
 		env = append(env, "OPENAI_BASE_URL="+m.cfg.OpenAIBaseURL)
 	}
+	if m.cfg.DesktopDPI != "" {
+		env = append(env, "DESKTOP_DPI="+m.cfg.DesktopDPI)
+	}
+	if m.cfg.DesktopFontSize != "" {
+		env = append(env, "DESKTOP_FONT_SIZE="+m.cfg.DesktopFontSize)
+	}
+	if m.cfg.DesktopTheme != "" {
+		env = append(env, "DESKTOP_THEME="+m.cfg.DesktopTheme)
+	}
 
 	workspaceBind := fmt.Sprintf("sa-workspace-%s:/workspace", safeUser)
 	if m.cfg.WorkspaceHostDir != "" {

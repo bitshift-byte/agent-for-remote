@@ -17,10 +17,13 @@ type Config struct {
 	DockerHost      string
 	DockerNetwork   string
 	DesktopImage    string
-	DesktopMemoryMB int64
-	DesktopCPUs     float64
-	DesktopShmMB    int64
+	DesktopMemoryMB  int64
+	DesktopCPUs      float64
+	DesktopShmMB     int64
 	DesktopTZ        string
+	DesktopDPI       string
+	DesktopFontSize  string
+	DesktopTheme     string
 	StartTimeout     time.Duration
 	MockDesktop      bool
 	WorkspaceDataDir string
@@ -59,10 +62,13 @@ func Load() (*Config, error) {
 		DockerHost:       dockerHost,
 		DockerNetwork:    getEnv("DOCKER_NETWORK", "super-agent-net"),
 		DesktopImage:     getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
-		DesktopMemoryMB:  int64(getEnvInt("DESKTOP_MEMORY_MB", 4096)),
+		DesktopMemoryMB:  int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
 		DesktopCPUs:      getEnvFloat("DESKTOP_CPUS", 2.0),
 		DesktopShmMB:     int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
 		DesktopTZ:        getEnv("DESKTOP_TZ", "Asia/Shanghai"),
+		DesktopDPI:       strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
+		DesktopFontSize:  strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
+		DesktopTheme:     strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
 		StartTimeout:     time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
 		MockDesktop:      getEnvBool("MOCK_DESKTOP", false),
 		WorkspaceDataDir: getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),

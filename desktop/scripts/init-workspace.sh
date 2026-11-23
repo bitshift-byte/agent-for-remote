@@ -442,5 +442,31 @@ if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
 EOF
 fi
 
+# Seed Codex CLI config into persistent /config/.codex/config.toml on boot so existing /config volumes
+# also receive it. Prefers OPENAI_BASE_URL if set; otherwise auto-detects the Docker bridge gateway IP.
+CODEX_DIR="${USER_HOME}/.codex"
+mkdir -p "${CODEX_DIR}"
+if [ ! -f "${CODEX_DIR}/config.toml" ] || [ "${CODEX_OVERWRITE_CONFIG:-0}" = "1" ]; then
+  CODEX_MODEL_VAL="${CODEX_MODEL:-GLM}"
+  CODEX_BASE_URL_VAL="${OPENAI_BASE_URL:-}"
+  if [ -z "${CODEX_BASE_URL_VAL}" ]; then
+    GW_IP="$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}' || true)"
+    if [ -z "${GW_IP}" ]; then
+      GW_IP="172.18.0.1"
+    fi
+    CODEX_BASE_URL_VAL="http://${GW_IP}:18317/v1"
+  fi
+  cat <<EOF > "${CODEX_DIR}/config.toml"
+model = "${CODEX_MODEL_VAL}"
+model_provider = "glm"
+
+[model_providers.glm]
+name = "GLM via tunnel CPA"
+base_url = "${CODEX_BASE_URL_VAL}"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+EOF
+fi
+
 chmod +x "${DESKTOP_DIR}"/*.desktop
-chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${CLAUDE_DIR}" "${USER_HOME}/.sa-theme-v2" || true
+chown -R abc:abc "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${PANEL_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${SA_CONF_DIR}" "${CLAUDE_DIR}" "${CODEX_DIR}" "${USER_HOME}/.sa-theme-v2" || true

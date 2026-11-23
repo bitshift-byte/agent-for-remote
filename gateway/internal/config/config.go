@@ -31,10 +31,13 @@ type Config struct {
 	SyncLockTTL      time.Duration
 
 	// Runtime AI provider env vars injected into user containers (never written to /workspace)
-	AnthropicAPIKey  string
-	AnthropicBaseURL string
-	OpenAIAPIKey     string
-	OpenAIBaseURL    string
+	AnthropicAPIKey         string
+	AnthropicBaseURL        string
+	AnthropicModel          string
+	AnthropicSmallFastModel string
+	OpenAIAPIKey            string
+	OpenAIBaseURL           string
+	CodexModel              string
 }
 
 func Load() (*Config, error) {
@@ -54,30 +57,33 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:             port,
-		JWTSecret:        jwtSecret,
-		JWTTTL:           time.Duration(ttlHours) * time.Hour,
-		CookieSecure:     cookieSecure,
-		Users:            users,
-		DockerHost:       dockerHost,
-		DockerNetwork:    getEnv("DOCKER_NETWORK", "super-agent-net"),
-		DesktopImage:     getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
-		DesktopMemoryMB:  int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
-		DesktopCPUs:      getEnvFloat("DESKTOP_CPUS", 2.0),
-		DesktopShmMB:     int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
-		DesktopTZ:        getEnv("DESKTOP_TZ", "Asia/Shanghai"),
-		DesktopDPI:       strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
-		DesktopFontSize:  strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
-		DesktopTheme:     strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
-		StartTimeout:     time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
-		MockDesktop:      getEnvBool("MOCK_DESKTOP", false),
-		WorkspaceDataDir: getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),
-		WorkspaceHostDir: strings.TrimRight(strings.TrimSpace(os.Getenv("WORKSPACE_HOST_DIR")), "/"),
-		SyncLockTTL:      time.Duration(getEnvInt("SYNC_LOCK_TTL_SEC", 60)) * time.Second,
-		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
-		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
+		Port:                    port,
+		JWTSecret:               jwtSecret,
+		JWTTTL:                  time.Duration(ttlHours) * time.Hour,
+		CookieSecure:            cookieSecure,
+		Users:                   users,
+		DockerHost:              dockerHost,
+		DockerNetwork:           getEnv("DOCKER_NETWORK", "super-agent-net"),
+		DesktopImage:            getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
+		DesktopMemoryMB:         int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
+		DesktopCPUs:             getEnvFloat("DESKTOP_CPUS", 2.0),
+		DesktopShmMB:            int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
+		DesktopTZ:               getEnv("DESKTOP_TZ", "Asia/Shanghai"),
+		DesktopDPI:              strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
+		DesktopFontSize:         strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
+		DesktopTheme:            strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
+		StartTimeout:            time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
+		MockDesktop:             getEnvBool("MOCK_DESKTOP", false),
+		WorkspaceDataDir:        getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),
+		WorkspaceHostDir:        strings.TrimRight(strings.TrimSpace(os.Getenv("WORKSPACE_HOST_DIR")), "/"),
+		SyncLockTTL:             time.Duration(getEnvInt("SYNC_LOCK_TTL_SEC", 60)) * time.Second,
+		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL:        os.Getenv("ANTHROPIC_BASE_URL"),
+		AnthropicModel:          strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")),
+		AnthropicSmallFastModel: strings.TrimSpace(os.Getenv("ANTHROPIC_SMALL_FAST_MODEL")),
+		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:           os.Getenv("OPENAI_BASE_URL"),
+		CodexModel:              strings.TrimSpace(os.Getenv("CODEX_MODEL")),
 	}
 
 	return cfg, nil

@@ -247,11 +247,20 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 	if m.cfg.AnthropicBaseURL != "" {
 		env = append(env, "ANTHROPIC_BASE_URL="+m.cfg.AnthropicBaseURL)
 	}
+	if m.cfg.AnthropicModel != "" {
+		env = append(env, "ANTHROPIC_MODEL="+m.cfg.AnthropicModel)
+	}
+	if m.cfg.AnthropicSmallFastModel != "" {
+		env = append(env, "ANTHROPIC_SMALL_FAST_MODEL="+m.cfg.AnthropicSmallFastModel)
+	}
 	if m.cfg.OpenAIAPIKey != "" {
 		env = append(env, "OPENAI_API_KEY="+m.cfg.OpenAIAPIKey)
 	}
 	if m.cfg.OpenAIBaseURL != "" {
 		env = append(env, "OPENAI_BASE_URL="+m.cfg.OpenAIBaseURL)
+	}
+	if m.cfg.CodexModel != "" {
+		env = append(env, "CODEX_MODEL="+m.cfg.CodexModel)
 	}
 	if m.cfg.DesktopDPI != "" {
 		env = append(env, "DESKTOP_DPI="+m.cfg.DesktopDPI)

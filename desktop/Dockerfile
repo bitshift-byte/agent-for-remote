@@ -16,9 +16,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SDL_IM_MODULE=fcitx \
     NODE_MAJOR=22
 
-# Faster apt mirror for builds from this network (archive.ubuntu.com is throttled)
-RUN sed -i "s|archive.ubuntu.com|mirror.arizona.edu|g; s|security.ubuntu.com|mirror.arizona.edu|g" \
-        /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+# Faster apt mirror for builds (override via --build-arg APT_MIRROR=... if needed)
+ARG APT_MIRROR=mirror.arizona.edu
+RUN if [ -n "${APT_MIRROR}" ]; then \
+      sed -i "s|archive.ubuntu.com|${APT_MIRROR}|g; s|security.ubuntu.com|${APT_MIRROR}|g" \
+        /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    fi
 
 # 1. Core system tools, Python 3, Chinese locale, fonts, and fcitx5 Pinyin IME
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -148,10 +151,8 @@ ENV BROWSER=/usr/local/bin/super-agent-browser
 
 EXPOSE 3000 3001
 
-# 9. AI model defaults: route Claude Code & Codex to GLM via reverse-tunnel CPA
+# 9. AI model defaults (can be overridden at runtime via .env: ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL / CODEX_MODEL / OPENAI_BASE_URL)
+# Note: /config/.codex/config.toml is seeded at container boot by init-workspace.sh so existing persistent /config volumes receive it too.
 ENV ANTHROPIC_MODEL=GLM \
-    ANTHROPIC_SMALL_FAST_MODEL=GLM
-RUN mkdir -p /config/.codex /home/abc/.codex && \
-    printf "model = \"GLM\"\nmodel_provider = \"glm\"\n\n[model_providers.glm]\nname = \"GLM via tunnel CPA\"\nbase_url = \"http://172.18.0.1:18317/v1\"\nwire_api = \"responses\"\nenv_key = \"OPENAI_API_KEY\"\n" > /config/.codex/config.toml && \
-    cp /config/.codex/config.toml /home/abc/.codex/config.toml && \
-    chown -R 1000:1000 /config/.codex /home/abc/.codex
+    ANTHROPIC_SMALL_FAST_MODEL=GLM \
+    CODEX_MODEL=GLM

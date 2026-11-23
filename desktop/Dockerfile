@@ -95,11 +95,36 @@ else\n\
 fi\n' > /usr/local/bin/super-agent-browser \
     && chmod +x /usr/local/bin/super-agent-browser
 
-# 6. Prepare shared /workspace mount point, transparent local shell wrapper, and s6 init script
+# 6. Desktop Keyring (persists ChatGPT & Claude sign-ins) + optional official .deb pre-bake
+# Pass --build-arg CLAUDE_DESKTOP_DEB_URL=... / CHATGPT_DESKTOP_DEB_URL=... during docker build,
+# or place downloaded .deb files under desktop/packages/ (see README).
+ARG CLAUDE_DESKTOP_DEB_URL=""
+ARG CHATGPT_DESKTOP_DEB_URL=""
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gnome-keyring libsecret-1-0 \
+    && if [ -n "${CLAUDE_DESKTOP_DEB_URL}" ]; then \
+         wget -qO /tmp/claude-desktop.deb "${CLAUDE_DESKTOP_DEB_URL}" \
+         && (apt-get install -y --no-install-recommends /tmp/claude-desktop.deb || true) \
+         && rm -f /tmp/claude-desktop.deb; \
+       fi \
+    && if [ -n "${CHATGPT_DESKTOP_DEB_URL}" ]; then \
+         wget -qO /tmp/chatgpt-desktop.deb "${CHATGPT_DESKTOP_DEB_URL}" \
+         && (apt-get install -y --no-install-recommends /tmp/chatgpt-desktop.deb || true) \
+         && rm -f /tmp/chatgpt-desktop.deb; \
+       fi \
+    && rm -rf /var/lib/apt/lists/*
+
+# 7. Prepare shared /workspace mount point, launchers, transparent local shell wrapper, and s6 init script
 RUN mkdir -p /workspace /custom-cont-init.d
 COPY scripts/sa-local-sh /usr/local/bin/sa-local-sh
+COPY scripts/super-agent-chatgpt /usr/local/bin/super-agent-chatgpt
+COPY scripts/super-agent-claude-desktop /usr/local/bin/super-agent-claude-desktop
 COPY scripts/init-workspace.sh /custom-cont-init.d/99-super-agent-init.sh
-RUN chmod +x /usr/local/bin/sa-local-sh /custom-cont-init.d/99-super-agent-init.sh
+RUN chmod +x \
+    /usr/local/bin/sa-local-sh \
+    /usr/local/bin/super-agent-chatgpt \
+    /usr/local/bin/super-agent-claude-desktop \
+    /custom-cont-init.d/99-super-agent-init.sh
 
 ENV BROWSER=/usr/local/bin/super-agent-browser
 

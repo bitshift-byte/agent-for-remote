@@ -3,19 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Super-Agent 云端工作区</title>
+  <title>Super-Agent</title>
   <style>
     :root {
-      --bg: #0b1020;
-      --panel: #131a2e;
-      --panel-border: #233052;
-      --text: #e6ecf8;
-      --muted: #93a3c7;
-      --accent: #4f7cff;
-      --accent-hover: #3d68e6;
-      --success: #22c55e;
-      --warning: #f59e0b;
-      --danger: #ef4444;
+      --bg: #09090b;
+      --surface: #111114;
+      --surface-2: #17171b;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.15);
+      --text: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --primary-bg: #fafafa;
+      --primary-text: #09090b;
+      --primary-hover: #e4e4e7;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --mono: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
     * { box-sizing: border-box; }
@@ -23,196 +29,455 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
       background: var(--bg);
       color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     .hidden { display: none !important; }
 
-    /* Centered card layout for login & dashboard */
-    .center-wrap {
+    /* Subtle architectural dot grid */
+    .canvas {
+      min-height: 100vh;
+      background-color: var(--bg);
+      background-image: radial-gradient(rgba(255, 255, 255, 0.065) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    /* Login layout */
+    .login-wrap {
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 24px;
-      background: radial-gradient(circle at top, #182342 0%, #0b1020 65%);
     }
 
-    .card {
+    .login-card {
       width: 100%;
-      max-width: 440px;
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      padding: 32px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+      max-width: 380px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
 
-    .brand {
+    .brand-lockup {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 8px;
     }
-    .brand-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 12px var(--accent);
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: #fafafa;
+      color: #09090b;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
     }
-    .brand h1 {
-      margin: 0;
-      font-size: 20px;
+    .brand-name {
+      font-size: 15px;
       font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
     }
-    .subtitle {
-      margin: 0 0 24px;
+    .brand-tag {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+
+    .lead {
+      margin: 10px 0 22px;
       font-size: 13px;
-      color: var(--muted);
-      line-height: 1.5;
+      line-height: 1.55;
+      color: var(--text-secondary);
     }
 
     label {
       display: block;
-      font-size: 13px;
-      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
       margin-bottom: 6px;
     }
+
     input[type="text"], input[type="password"] {
       width: 100%;
-      padding: 11px 13px;
-      border-radius: 10px;
-      border: 1px solid var(--panel-border);
-      background: #0d1326;
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
       color: var(--text);
-      font-size: 14px;
-      margin-bottom: 16px;
+      font-family: var(--sans);
+      font-size: 13px;
+      margin-bottom: 14px;
       outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
+    input:hover { border-color: var(--border-strong); }
     input:focus {
-      border-color: var(--accent);
+      border-color: rgba(255, 255, 255, 0.35);
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.07);
     }
 
     button {
       cursor: pointer;
       border: none;
-      border-radius: 10px;
-      font-size: 14px;
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 13px;
       font-weight: 500;
-      padding: 11px 16px;
-      transition: background 0.15s ease, opacity 0.15s ease;
+      height: 36px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.14s ease, border-color 0.14s ease, opacity 0.14s ease, color 0.14s ease;
     }
-    button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
     .btn-primary {
-      width: 100%;
-      background: var(--accent);
-      color: #fff;
+      background: var(--primary-bg);
+      color: var(--primary-text);
     }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+
     .btn-secondary {
-      background: #1e2947;
+      background: var(--surface-2);
       color: var(--text);
-      border: 1px solid var(--panel-border);
+      border: 1px solid var(--border);
     }
-    .btn-secondary:hover:not(:disabled) { background: #27355b; }
+    .btn-secondary:hover:not(:disabled) {
+      background: #202026;
+      border-color: var(--border-strong);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid transparent;
+    }
+    .btn-ghost:hover:not(:disabled) {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
     .btn-danger {
-      background: rgba(239, 68, 68, 0.14);
-      color: #fca5a5;
-      border: 1px solid rgba(239, 68, 68, 0.35);
+      background: rgba(239, 68, 68, 0.1);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.24);
     }
-    .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.25); }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-block { width: 100%; height: 38px; }
+    .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
 
     .error-msg {
       color: #fca5a5;
-      background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.24);
       border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 13px;
+      padding: 9px 12px;
+      font-size: 12px;
+      line-height: 1.5;
       margin-bottom: 16px;
     }
 
-    .status-box {
-      background: #0d1326;
-      border: 1px solid var(--panel-border);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 20px;
+    /* Dashboard layout */
+    .dash-shell {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 28px 24px 48px;
     }
-    .status-row {
+
+    .dash-nav {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      font-size: 13px;
-      padding: 5px 0;
+      justify-content: space-between;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
     }
-    .status-row span:first-child { color: var(--muted); }
-    .badge {
+    .nav-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .user-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 10px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .user-pill strong { color: var(--text); font-weight: 500; }
+
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 780px) {
+      .dash-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .panel-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .panel-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
       border-radius: 999px;
       font-size: 12px;
       font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      white-space: nowrap;
     }
-    .badge-running { background: rgba(34, 197, 94, 0.16); color: #86efac; }
-    .badge-stopped { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
-    .badge-starting { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+    .status-badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .badge-running {
+      color: #4ade80;
+      border-color: rgba(34, 197, 94, 0.25);
+      background: rgba(34, 197, 94, 0.08);
+    }
+    .badge-starting {
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.28);
+      background: rgba(245, 158, 11, 0.08);
+    }
+    .badge-stopped {
+      color: #a1a1aa;
+      border-color: var(--border);
+      background: var(--surface-2);
+    }
+
+    .kv-list {
+      border-top: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    .kv-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .kv-key { color: var(--text-muted); }
+    .kv-val {
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
 
     .actions-row {
       display: flex;
-      gap: 10px;
-      margin-top: 12px;
+      gap: 8px;
     }
-    .actions-row button { flex: 1; }
+    .actions-row .btn-primary { flex: 1; }
 
-    /* Loading overlay */
+    /* Waking spinner */
+    .waking-box {
+      padding: 28px 16px;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      margin-bottom: 16px;
+    }
     .spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid rgba(79, 124, 255, 0.25);
-      border-top-color: var(--accent);
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      border-top-color: #fafafa;
       border-radius: 50%;
-      animation: spin 0.9s linear infinite;
-      margin: 0 auto 16px;
+      animation: spin 0.75s linear infinite;
+      margin: 0 auto 12px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Fullscreen desktop workspace view */
+    /* Pairing code block */
+    .pair-card {
+      background: #0b0b0e;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .pair-code {
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      color: #fafafa;
+      margin: 8px 0 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .pair-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .pair-copied {
+      font-size: 11px;
+      color: #4ade80;
+      margin-top: 8px;
+      min-height: 15px;
+    }
+
+    .device-list {
+      border-top: 1px solid var(--border);
+    }
+    .device-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .device-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .device-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-top: 2px;
+    }
+    .device-live {
+      color: #4ade80;
+      font-size: 11px;
+      margin-left: 6px;
+      font-family: var(--sans);
+    }
+
+    /* Fullscreen Desktop View + Slim HUD */
     .desktop-shell {
       display: flex;
       flex-direction: column;
       height: 100vh;
       width: 100vw;
+      background: #000;
     }
     .topbar {
-      height: 44px;
-      background: #0e1529;
-      border-bottom: 1px solid var(--panel-border);
+      height: 40px;
+      background: #0c0c0e;
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 14px;
-      font-size: 13px;
+      padding: 0 12px;
+      gap: 12px;
       flex-shrink: 0;
     }
     .topbar-left, .topbar-right {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+      min-width: 0;
     }
-    .topbar button {
-      padding: 5px 10px;
+    .topbar-sep {
+      width: 1px;
+      height: 14px;
+      background: var(--border);
+    }
+    .port-group {
+      display: inline-flex;
+      align-items: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 2px 0 8px;
+      height: 28px;
+    }
+    .port-group span {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      user-select: none;
+    }
+    .port-group input {
+      width: 62px;
+      height: 24px;
+      margin: 0;
+      padding: 0 6px;
+      border: none;
+      background: transparent;
+      font-family: var(--mono);
       font-size: 12px;
-      border-radius: 7px;
+      color: var(--text);
+      box-shadow: none;
     }
+    .port-group input:focus { box-shadow: none; }
+    .port-group button {
+      height: 22px;
+      padding: 0 8px;
+      font-size: 11px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+    }
+    .port-group button:hover { background: rgba(255, 255, 255, 0.14); }
+
     .desktop-frame {
       flex: 1;
       width: 100%;
@@ -223,99 +488,138 @@
 </head>
 <body>
   <!-- Login View -->
-  <div id="view-login" class="center-wrap hidden">
-    <div class="card">
-      <div class="brand">
-        <div class="brand-dot"></div>
-        <h1>Super-Agent 云桌面</h1>
+  <div id="view-login" class="canvas login-wrap hidden">
+    <div class="login-card">
+      <div class="brand-lockup">
+        <span class="brand-mark">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </span>
+        <span class="brand-name">Super-Agent</span>
+        <span class="brand-tag">workspace</span>
       </div>
-      <p class="subtitle">浏览器直连海外 Ubuntu 工作区，内置 Claude Code、Codex、Chrome 与中文输入法。</p>
+      <p class="lead">登录云端 Ubuntu 工作区，配合本地伴侣实现加密同步与混合算力执行。</p>
       <div id="login-error" class="error-msg hidden"></div>
       <form id="login-form">
         <label for="username">账号</label>
-        <input id="username" type="text" autocomplete="username" placeholder="例如 admin" required />
+        <input id="username" type="text" autocomplete="username" placeholder="admin" required />
         <label for="password">密码</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
-        <button id="login-btn" type="submit" class="btn-primary">登录工作区</button>
+        <input id="password" type="password" autocomplete="current-password" placeholder="输入密码" required />
+        <button id="login-btn" type="submit" class="btn-primary btn-block">登录</button>
       </form>
     </div>
   </div>
 
-  <!-- Dashboard / Wake View -->
-  <div id="view-dashboard" class="center-wrap hidden">
-    <div class="card">
-      <div class="brand">
-        <div class="brand-dot"></div>
-        <h1>工作区控制台</h1>
-      </div>
-      <p class="subtitle">当前用户：<strong id="dash-user"></strong></p>
+  <!-- Dashboard View -->
+  <div id="view-dashboard" class="canvas hidden">
+    <div class="dash-shell">
+      <header class="dash-nav">
+        <div class="brand-lockup">
+          <span class="brand-mark">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </span>
+          <span class="brand-name">Super-Agent</span>
+          <span class="brand-tag">Selkies 2.0</span>
+        </div>
+        <div class="nav-user">
+          <span class="user-pill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+            <strong id="dash-user"></strong>
+          </span>
+          <button id="btn-logout" class="btn-ghost btn-sm">退出</button>
+        </div>
+      </header>
 
       <div id="dash-error" class="error-msg hidden"></div>
 
-      <div id="waking-panel" class="status-box hidden" style="text-align:center; padding: 28px 16px;">
-        <div class="spinner"></div>
-        <div style="font-weight:500; margin-bottom:6px;">正在唤醒云端工作区...</div>
-        <div style="font-size:12px; color:var(--muted);">首次启动容器约需 10–25 秒，就绪后将自动进入桌面</div>
-      </div>
+      <main class="dash-grid">
+        <!-- Left: Cloud Workspace Control -->
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">云端工作区</div>
+              <div class="panel-desc">独立隔离 Ubuntu XFCE 容器与持久化存储</div>
+            </div>
+            <span id="status-badge" class="status-badge badge-stopped">检查中</span>
+          </div>
 
-      <div id="status-panel" class="status-box">
-        <div class="status-row">
-          <span>桌面状态</span>
-          <span id="status-badge" class="badge badge-stopped">检查中</span>
-        </div>
-        <div class="status-row">
-          <span>容器实例</span>
-          <span id="status-container">-</span>
-        </div>
-        <div class="status-row">
-          <span>配额规格</span>
-          <span id="status-spec">-</span>
-        </div>
-        <div class="status-row">
-          <span>同步设备锁</span>
-          <span id="status-sync-lock">未连接</span>
-        </div>
-      </div>
+          <div id="waking-panel" class="waking-box hidden">
+            <div class="spinner"></div>
+            <div style="font-weight:500;font-size:13px;margin-bottom:4px;">正在唤醒工作区容器</div>
+            <div style="font-size:12px;color:var(--text-muted);">首次启动约需 10–25 秒，挂起容器将秒级恢复</div>
+          </div>
 
-      <button id="btn-launch" class="btn-primary">启动并进入云桌面</button>
-      <div class="actions-row">
-        <button id="btn-stop" class="btn-danger">停止容器</button>
-        <button id="btn-logout" class="btn-secondary">退出登录</button>
-      </div>
+          <div id="status-panel" class="kv-list">
+            <div class="kv-row">
+              <span class="kv-key">容器实例</span>
+              <span id="status-container" class="kv-val">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-key">计算配额</span>
+              <span id="status-spec" class="kv-val">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-key">活跃同步设备</span>
+              <span id="status-sync-lock" class="kv-val">未连接</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-key">载荷加密</span>
+              <span class="kv-val">AES-256-GCM</span>
+            </div>
+          </div>
 
-      <!-- Bind Local Machine (6-char Pairing Code) -->
-      <div class="status-box" style="margin-top:18px; margin-bottom:0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <strong style="font-size:13px;">本机伴侣绑定（Mac / Windows）</strong>
-          <button id="btn-gen-code" class="btn-secondary" style="padding:5px 10px;font-size:12px;">生成 6 位配对码</button>
-        </div>
-        <div id="pair-box" class="hidden" style="background:#080d1a;border:1px dashed var(--accent);border-radius:10px;padding:12px;text-align:center;margin-bottom:10px;">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">在本机 Super-Agent 托盘应用中输入或粘贴（5 分钟内有效）</div>
-          <div id="pair-code-display" style="font-size:26px;font-weight:700;letter-spacing:4px;color:#93c5fd;margin:6px 0;">---</div>
-          <button id="btn-copy-bind" class="btn-primary" style="width:auto;padding:6px 14px;font-size:12px;margin-top:4px;">一键复制绑定口令（含网关地址）</button>
-          <div id="pair-copy-hint" style="font-size:11px;color:#86efac;margin-top:6px;min-height:14px;"></div>
-        </div>
-        <div id="bound-devices-list" style="font-size:12px;color:var(--muted);">暂无已绑定设备</div>
-      </div>
+          <div class="actions-row">
+            <button id="btn-launch" class="btn-primary">启动并进入云桌面</button>
+            <button id="btn-stop" class="btn-danger">停止释放</button>
+          </div>
+        </section>
+
+        <!-- Right: Local Companion Pairing & Bound Devices -->
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">本机伴侣</div>
+              <div class="panel-desc">6 位配对码免密绑定 Mac / Windows</div>
+            </div>
+            <button id="btn-gen-code" class="btn-secondary btn-sm">生成配对码</button>
+          </div>
+
+          <div id="pair-box" class="pair-card hidden">
+            <div class="pair-hint">5 分钟内有效 · 粘贴至托盘应用自动完成密钥协商</div>
+            <div id="pair-code-display" class="pair-code">---</div>
+            <button id="btn-copy-bind" class="btn-primary btn-sm">复制绑定口令</button>
+            <div id="pair-copy-hint" class="pair-copied"></div>
+          </div>
+
+          <div id="bound-devices-list" class="device-list" style="font-size:12px;color:var(--text-muted);padding-top:10px;">
+            加载设备列表...
+          </div>
+        </section>
+      </main>
     </div>
   </div>
 
-  <!-- Fullscreen Selkies Desktop View with Live Super-Agent Status HUD -->
+  <!-- Fullscreen Selkies Desktop View with Slim HUD -->
   <div id="view-desktop" class="desktop-shell hidden">
     <div class="topbar">
       <div class="topbar-left">
-        <span class="brand-dot" style="width:9px;height:9px;"></span>
-        <strong>Super-Agent</strong>
-        <span style="color:var(--muted);" id="bar-user"></span>
-        <span id="hud-worker-badge" class="badge badge-stopped" style="font-size:11px;">本机检测中...</span>
-        <span id="hud-tunnel-badge" class="badge badge-stopped" style="font-size:11px;">端口预览: 离线</span>
+        <span class="brand-mark" style="width:20px;height:20px;border-radius:5px;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </span>
+        <span style="font-weight:600;font-size:12px;">Super-Agent</span>
+        <span style="color:var(--text-muted);font-size:12px;" id="bar-user"></span>
+        <span class="topbar-sep"></span>
+        <span id="hud-worker-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">检测本机...</span>
+        <span id="hud-tunnel-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">预览: 离线</span>
       </div>
       <div class="topbar-right">
-        <input id="hud-preview-port" type="text" placeholder="本地端口(如3000)" style="width:128px;margin:0;padding:4px 8px;font-size:12px;border-radius:7px;" />
-        <button id="bar-preview" class="btn-secondary">预览本机服务</button>
-        <button id="bar-newtab" class="btn-secondary">新标签页全屏</button>
-        <button id="bar-back" class="btn-secondary">返回控制台</button>
-        <button id="bar-stop" class="btn-danger">停止释放</button>
+        <div class="port-group">
+          <span>localhost:</span>
+          <input id="hud-preview-port" type="text" placeholder="3000" />
+          <button id="bar-preview" type="button">预览</button>
+        </div>
+        <button id="bar-newtab" class="btn-secondary btn-sm">新窗口</button>
+        <button id="bar-back" class="btn-secondary btn-sm">控制台</button>
+        <button id="bar-stop" class="btn-danger btn-sm">停止</button>
       </div>
     </div>
     <iframe id="desktop-iframe" class="desktop-frame" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
@@ -323,8 +627,9 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-
     let currentUser = null;
+    let lastBindString = "";
+    let hudTimer = null;
 
     function showView(name) {
       $("view-login").classList.toggle("hidden", name !== "login");
@@ -341,6 +646,10 @@
         el.textContent = msg;
         el.classList.remove("hidden");
       }
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
     }
 
     async function api(path, opts = {}) {
@@ -363,7 +672,7 @@
         const me = await api("/api/me");
         currentUser = me.username;
         $("dash-user").textContent = currentUser;
-        $("bar-user").textContent = `(${currentUser})`;
+        $("bar-user").textContent = currentUser;
         showView("dashboard");
         await refreshStatus();
       } catch {
@@ -376,10 +685,10 @@
       try {
         const st = await api("/api/desktop/status");
         $("status-container").textContent = st.container_name;
-        $("status-spec").textContent = `${st.cpus} vCPU / ${Math.round(st.memory_mb / 1024 * 10) / 10} GB RAM`;
+        $("status-spec").textContent = `${st.cpus} vCPU · ${Math.round(st.memory_mb / 1024 * 10) / 10} GB RAM`;
 
         const badge = $("status-badge");
-        badge.className = "badge";
+        badge.className = "status-badge";
         if (st.state === "running" && st.ready) {
           badge.classList.add("badge-running");
           badge.textContent = "运行中";
@@ -388,11 +697,11 @@
         } else if (st.state === "running") {
           badge.classList.add("badge-starting");
           badge.textContent = "启动中";
-          $("btn-launch").textContent = "等待并进入云桌面";
+          $("btn-launch").textContent = "等待就绪";
           $("btn-stop").disabled = false;
         } else if (st.state === "paused") {
           badge.classList.add("badge-starting");
-          badge.textContent = "已挂起";
+          badge.textContent = "已冻结";
           $("btn-launch").textContent = "唤醒并进入云桌面";
           $("btn-stop").disabled = false;
         } else {
@@ -405,17 +714,15 @@
         const lockInfo = await api("/api/sync/lock").catch(() => null);
         if (lockInfo && lockInfo.locked && lockInfo.lock) {
           const l = lockInfo.lock;
-          $("status-sync-lock").textContent = `${l.device_name || l.device_id} (${l.os || "unknown"})`;
+          $("status-sync-lock").textContent = `${l.device_name || l.device_id} (${l.os || "-"})`;
         } else {
-          $("status-sync-lock").textContent = "未连接（可绑定）";
+          $("status-sync-lock").textContent = "未连接";
         }
         await refreshDevices();
       } catch (e) {
         showError("dash-error", e.message);
       }
     }
-
-    let lastBindString = "";
 
     async function refreshDevices() {
       const box = $("bound-devices-list");
@@ -424,15 +731,18 @@
         const list = res.devices || [];
         const activeID = res.active_lock ? res.active_lock.device_id : "";
         if (list.length === 0) {
-          box.innerHTML = `<span style="color:var(--muted);">暂无已绑定设备，点击右上角生成配对码即可绑定本机。</span>`;
+          box.innerHTML = `<div style="padding:14px 0;color:var(--text-muted);font-size:12px;">暂无已绑定设备，点击右上角「生成配对码」绑定本机。</div>`;
           return;
         }
         box.innerHTML = list.map((d) => {
           const isActive = d.device_id === activeID;
-          const badge = isActive ? `<span style="color:#86efac;margin-left:6px;">● 同步中</span>` : "";
-          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
-            <div><strong style="color:var(--text);">${escapeHTML(d.device_name || d.device_id)}</strong> <span style="color:var(--muted);">(${escapeHTML(d.os || "-")})</span>${badge}</div>
-            <button data-revoke="${escapeHTML(d.device_id)}" class="btn-danger" style="padding:3px 9px;font-size:11px;">解绑</button>
+          const live = isActive ? `<span class="device-live">在线同步中</span>` : "";
+          return `<div class="device-item">
+            <div>
+              <div class="device-name">${escapeHTML(d.device_name || d.device_id)}${live}</div>
+              <div class="device-meta">${escapeHTML(d.os || "-")} · ${escapeHTML(d.device_id)}</div>
+            </div>
+            <button data-revoke="${escapeHTML(d.device_id)}" class="btn-ghost btn-sm" style="color:#f87171;">解绑</button>
           </div>`;
         }).join("");
         box.querySelectorAll("[data-revoke]").forEach((btn) => {
@@ -443,12 +753,43 @@
           });
         });
       } catch {
-        box.textContent = "无法加载已绑定设备列表";
+        box.textContent = "无法加载设备列表";
       }
     }
 
-    function escapeHTML(str) {
-      return String(str).replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+    async function refreshDesktopHUD() {
+      if ($("view-desktop").classList.contains("hidden")) return;
+      try {
+        const [execSt, tunSt] = await Promise.all([
+          api("/api/exec/status").catch(() => null),
+          api("/api/tunnel/status").catch(() => null),
+        ]);
+        const wb = $("hud-worker-badge");
+        if (execSt && execSt.worker_online) {
+          const dev = execSt.active_lock ? (execSt.active_lock.device_name || execSt.active_lock.device_id) : "本机";
+          wb.className = "status-badge badge-running";
+          wb.textContent = `本机在线 · ${dev}`;
+        } else {
+          wb.className = "status-badge badge-starting";
+          wb.textContent = "本机离线 · 云端小批量";
+        }
+        const tb = $("hud-tunnel-badge");
+        if (tunSt && tunSt.tunnel_online) {
+          tb.className = "status-badge badge-running";
+          tb.textContent = "预览就绪";
+        } else {
+          tb.className = "status-badge badge-stopped";
+          tb.textContent = "预览离线";
+        }
+      } catch {}
+    }
+
+    function openDesktop(url) {
+      $("desktop-iframe").src = url || "/desktop/";
+      showView("desktop");
+      refreshDesktopHUD();
+      if (hudTimer) clearInterval(hudTimer);
+      hudTimer = setInterval(refreshDesktopHUD, 4000);
     }
 
     $("btn-gen-code").addEventListener("click", async () => {
@@ -467,48 +808,11 @@
       if (!lastBindString) return;
       try {
         await navigator.clipboard.writeText(lastBindString);
-        $("pair-copy-hint").textContent = "已复制！去本机 Super-Agent 托盘应用直接粘贴即可完成绑定";
+        $("pair-copy-hint").textContent = "已复制，直接粘贴至托盘应用即可完成绑定";
       } catch {
-        prompt("请手动复制下方绑定口令：", lastBindString);
+        prompt("请手动复制绑定口令：", lastBindString);
       }
     });
-
-    let hudTimer = null;
-
-    async function refreshDesktopHUD() {
-      if ($("view-desktop").classList.contains("hidden")) return;
-      try {
-        const [execSt, tunSt] = await Promise.all([
-          api("/api/exec/status").catch(() => null),
-          api("/api/tunnel/status").catch(() => null),
-        ]);
-        const wb = $("hud-worker-badge");
-        if (execSt && execSt.worker_online) {
-          const dev = execSt.active_lock ? (execSt.active_lock.device_name || execSt.active_lock.device_id) : "本机";
-          wb.className = "badge badge-running";
-          wb.textContent = `● 本机算力在线 (${dev})`;
-        } else {
-          wb.className = "badge badge-starting";
-          wb.textContent = "● 本机离线（云端小批量降级）";
-        }
-        const tb = $("hud-tunnel-badge");
-        if (tunSt && tunSt.tunnel_online) {
-          tb.className = "badge badge-running";
-          tb.textContent = "预览通道: 就绪";
-        } else {
-          tb.className = "badge badge-stopped";
-          tb.textContent = "预览通道: 离线";
-        }
-      } catch {}
-    }
-
-    function openDesktop(url) {
-      $("desktop-iframe").src = url || "/desktop/";
-      showView("desktop");
-      refreshDesktopHUD();
-      if (hudTimer) clearInterval(hudTimer);
-      hudTimer = setInterval(refreshDesktopHUD, 4000);
-    }
 
     $("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -524,7 +828,7 @@
         });
         currentUser = data.username;
         $("dash-user").textContent = currentUser;
-        $("bar-user").textContent = `(${currentUser})`;
+        $("bar-user").textContent = currentUser;
         showView("dashboard");
         await refreshStatus();
       } catch (err) {
@@ -580,7 +884,7 @@
       const raw = ($("hud-preview-port").value || "").trim();
       const port = parseInt(raw, 10);
       if (!port || port < 1 || port > 65535) {
-        alert("请输入本机运行中的开发服务端口号（例如 3000 或 8080）");
+        alert("请输入本机运行中的服务端口号（例如 3000 或 8080）");
         return;
       }
       window.open(`/api/tunnel/proxy/${port}/`, "_blank");

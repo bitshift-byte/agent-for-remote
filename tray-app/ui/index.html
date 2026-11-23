@@ -3,121 +3,367 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Super-Agent 本地伴侣</title>
+  <title>Super-Agent</title>
   <style>
     :root {
-      --bg: #0b1020;
-      --panel: #131b31;
-      --border: #243256;
-      --text: #e6ecf8;
-      --muted: #8fa1c7;
-      --accent: #4f7cff;
-      --accent-hover: #3c67e5;
+      --bg: #09090b;
+      --surface: #111114;
+      --surface-2: #17171b;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --primary-bg: #fafafa;
+      --primary-text: #09090b;
+      --primary-hover: #e4e4e7;
       --green: #22c55e;
       --amber: #f59e0b;
       --red: #ef4444;
+      --mono: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
+
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
       padding: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-family: var(--sans);
       font-size: 13px;
+      -webkit-font-smoothing: antialiased;
     }
+
     .hidden { display: none !important; }
-    .app { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 100vh; }
-    .header { display: flex; align-items: center; justify-content: space-between; }
-    .brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
-    .dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+    .app {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 100vh;
+    }
+
+    /* Top bar */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 2px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: #fafafa;
+      color: #09090b;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .brand-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-secondary);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #71717a;
+      flex-shrink: 0;
+    }
+    .dot.running { background: var(--green); }
     .dot.starting { background: var(--amber); }
     .dot.conflict, .dot.lock_lost, .dot.error { background: var(--red); }
-    .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; background: rgba(148,163,184,0.16); color: #cbd5e1; }
-    .badge.running { background: rgba(34,197,94,0.16); color: #86efac; }
-    .badge.starting { background: rgba(245,158,11,0.16); color: #fcd34d; }
-    .badge.conflict, .badge.lock_lost, .badge.error { background: rgba(239,68,68,0.16); color: #fca5a5; }
-    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-    label { color: var(--muted); font-size: 12px; }
-    input { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0c1326; color: var(--text); font-size: 13px; outline: none; }
-    input:focus { border-color: var(--accent); }
-    .dir-row { display: flex; gap: 8px; }
-    .dir-row input { flex: 1; }
-    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-    button { border: none; border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 500; cursor: pointer; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn-secondary { background: #1e2a4a; color: var(--text); border: 1px solid var(--border); }
-    .btn-warn { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4); }
-    .btn-danger { background: rgba(239,68,68,0.16); color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
-    .alert { border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #fca5a5; }
-    .meta-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 4px 0; }
-    .meta-row strong { color: var(--text); font-weight: 500; }
-    .logs { background: #080d1a; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.55; color: #cbd5e1; height: 170px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+
+    .badge.running { color: #4ade80; border-color: rgba(34, 197, 94, 0.25); background: rgba(34, 197, 94, 0.08); }
+    .badge.starting { color: #fbbf24; border-color: rgba(245, 158, 11, 0.28); background: rgba(245, 158, 11, 0.08); }
+    .badge.conflict, .badge.lock_lost, .badge.error { color: #f87171; border-color: rgba(239, 68, 68, 0.28); background: rgba(239, 68, 68, 0.08); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .section-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 9px;
+    }
+    .field:last-child { margin-bottom: 0; }
+    label {
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    input, select {
+      width: 100%;
+      height: 32px;
+      padding: 0 9px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.14s ease;
+    }
+    input:hover, select:hover { border-color: var(--border-strong); }
+    input:focus, select:focus { border-color: rgba(255, 255, 255, 0.35); }
+    input.mono { font-family: var(--mono); font-size: 11.5px; }
+
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row > input, .row > select { flex: 1; min-width: 0; }
+
+    .btn-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 7px;
+      height: 30px;
+      padding: 0 11px;
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: background 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-primary { background: var(--primary-bg); color: var(--primary-text); }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled) { background: #202026; border-color: var(--border-strong); }
+
+    .btn-warn { background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.2); }
+
+    .btn-danger { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.26); }
+    .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.18); }
+
+    .alert {
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.28);
+      color: #fca5a5;
+    }
+
+    /* High-risk approval panel */
+    .approval-card {
+      background: rgba(245, 158, 11, 0.06);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .approval-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fbbf24;
+      margin-bottom: 8px;
+    }
+    .approval-item {
+      background: #0c0c0f;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px;
+    }
+    .approval-reason {
+      font-size: 11px;
+      color: #fbbf24;
+      margin-bottom: 5px;
+    }
+    .approval-cmd {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: #fafafa;
+      background: #070709;
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      border-radius: 6px;
+      word-break: break-all;
+      margin-bottom: 8px;
+    }
+
+    /* Compact key-value rows */
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .meta-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .meta-row:first-child { padding-top: 0; }
+    .meta-row span { color: var(--text-muted); }
+    .meta-row strong {
+      color: var(--text);
+      font-weight: 500;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Log console */
+    .log-panel {
+      background: #070709;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .log-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .logs {
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.55;
+      color: #a1a1aa;
+      height: 164px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .logs::-webkit-scrollbar { width: 6px; }
+    .logs::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
   </style>
 </head>
 <body>
   <div class="app">
-    <div class="header">
+    <header class="header">
       <div class="brand">
-        <span id="status-dot" class="dot"></span>
-        <span>Super-Agent 本地伴侣</span>
+        <span class="brand-mark">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </span>
+        <span class="brand-title">Super-Agent</span>
       </div>
-      <span id="status-badge" class="badge">连接后台中...</span>
-    </div>
+      <div id="status-badge" class="status-pill badge">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">连接后台...</span>
+      </div>
+    </header>
 
     <div id="alert-box" class="alert hidden"></div>
 
-    <!-- High-Risk Command Approval Banner (Human-in-the-Loop) -->
-    <div id="approval-box" class="card hidden" style="border-color:rgba(245,158,11,0.65);background:rgba(245,158,11,0.08);">
-      <div style="font-weight:600;color:#fcd34d;margin-bottom:8px;">⚠️ 云端 Agent 请求执行高危命令（等待本机确认）</div>
+    <!-- High-Risk Command Approval Banner -->
+    <div id="approval-box" class="approval-card hidden">
+      <div class="approval-head">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>云端 Agent 请求执行敏感命令</span>
+      </div>
       <div id="approval-list" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
-    <!-- Unbound View: Zero-password 6-char Pairing Code Onboarding -->
+    <!-- Unbound View -->
     <div id="view-pair" class="card">
-      <div style="font-weight:600;margin-bottom:6px;">绑定云端工作区（免密配对）</div>
-      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px;">
-        1. 在浏览器打开云桌面控制台，点击「生成 6 位配对码」并复制绑定口令<br/>
-        2. 粘贴到下方并选择本地项目目录，点「立即绑定」即可自动开始同步
-      </div>
+      <div class="section-title">绑定云端工作区</div>
+      <div class="section-sub">在网页控制台生成 6 位配对码并复制绑定口令，粘贴到下方即可免密绑定并自动协商 AES-256 密钥。</div>
 
       <div class="field">
-        <label for="pair-input">绑定口令（super-agent://pair?...）或 6 位配对码（如 K7M-4Q9）</label>
-        <input id="pair-input" type="text" placeholder="直接粘贴网页复制的绑定口令，或输入 6 位配对码" />
+        <label for="pair-input">绑定口令或 6 位配对码</label>
+        <input id="pair-input" class="mono" type="text" placeholder="super-agent://pair?... 或 K7M-4Q9" />
       </div>
       <div class="field">
-        <label for="pair-server">云端网关地址（若粘贴完整绑定口令可留空自动识别）</label>
-        <input id="pair-server" type="text" placeholder="http://localhost:8080" />
+        <label for="pair-server">云端网关地址（粘贴完整口令时自动识别）</label>
+        <input id="pair-server" class="mono" type="text" placeholder="http://localhost:8080" />
       </div>
       <div class="field">
-        <label for="pair-dir">本地同步仓库目录</label>
-        <div class="dir-row">
-          <input id="pair-dir" type="text" placeholder="请选择本地项目文件夹" />
-          <button id="btn-pick-pair" type="button" class="btn-secondary">选择文件夹…</button>
+        <label for="pair-dir">本地同步目录</label>
+        <div class="row">
+          <input id="pair-dir" class="mono" type="text" placeholder="选择本地项目文件夹" />
+          <button id="btn-pick-pair" type="button" class="btn-secondary">选择</button>
         </div>
       </div>
       <div class="field">
         <label for="pair-device">本机名称</label>
-        <input id="pair-device" type="text" placeholder="例如 My-MacBook" />
+        <input id="pair-device" type="text" placeholder="My-MacBook" />
       </div>
       <div class="btn-row">
-        <button id="btn-bind" class="btn-primary">立即绑定并启动同步</button>
+        <button id="btn-bind" class="btn-primary" style="flex:1;">绑定并启动同步</button>
       </div>
     </div>
 
-    <!-- Bound View: Status + Multi-Project Switch + Lock Control -->
-    <div id="view-bound" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+    <!-- Bound View -->
+    <div id="view-bound" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
       <div class="card">
         <div class="meta-row">
-          <span>已绑定账号</span>
+          <span>账号与网关</span>
           <strong id="meta-account">-</strong>
         </div>
         <div class="meta-row">
-          <span>当前设备</span>
+          <span>设备与加密</span>
           <strong id="meta-device">-</strong>
         </div>
         <div class="meta-row">
@@ -128,37 +374,38 @@
 
       <div class="card">
         <div class="field">
-          <label for="profile-select">常用项目快速切换（多工作区 Profile）</label>
-          <div class="dir-row">
-            <select id="profile-select" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#0c1326;color:var(--text);font-size:13px;">
-              <option value="">-- 选择已保存项目 --</option>
+          <label for="profile-select">项目快速切换</label>
+          <div class="row">
+            <select id="profile-select">
+              <option value="">选择已收藏项目</option>
             </select>
-            <button id="btn-save-profile" type="button" class="btn-secondary">收藏当前目录</button>
+            <button id="btn-save-profile" type="button" class="btn-secondary">收藏当前</button>
           </div>
         </div>
         <div class="field">
-          <label for="bound-dir">当前同步仓库目录（AI 命令将锁定在此目录执行）</label>
-          <div class="dir-row">
-            <input id="bound-dir" type="text" placeholder="请选择本地项目文件夹" />
-            <button id="btn-pick-bound" type="button" class="btn-secondary">切换文件夹…</button>
+          <label for="bound-dir">当前工作区目录</label>
+          <div class="row">
+            <input id="bound-dir" class="mono" type="text" placeholder="选择本地项目文件夹" />
+            <button id="btn-pick-bound" type="button" class="btn-secondary">更改</button>
           </div>
         </div>
         <div class="btn-row">
-          <button id="btn-start" class="btn-primary">启动同步</button>
-          <button id="btn-stop" class="btn-danger">停止同步</button>
-          <button id="btn-takeover" class="btn-warn hidden">强制接管设备锁</button>
-          <button id="btn-open-web" class="btn-secondary">打开云桌面</button>
-          <button id="btn-unbind" class="btn-secondary">解绑本机</button>
+          <button id="btn-start" class="btn-primary">启动</button>
+          <button id="btn-stop" class="btn-danger">停止</button>
+          <button id="btn-takeover" class="btn-warn hidden">接管设备锁</button>
+          <button id="btn-open-web" class="btn-secondary">云桌面</button>
+          <button id="btn-unbind" class="btn-secondary" style="margin-left:auto;">解绑</button>
         </div>
       </div>
     </div>
 
-    <div class="card" style="padding:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <span style="font-size:12px;color:var(--muted);">实时同步与本机执行日志</span>
-        <span style="font-size:11px;color:var(--muted);">关闭窗口将最小化至状态栏托盘</span>
+    <!-- Log Console -->
+    <div class="log-panel">
+      <div class="log-head">
+        <span>运行日志</span>
+        <span>关闭窗口将保持后台运行</span>
       </div>
-      <div id="logs" class="logs">等待连接本地 sync-agent 引擎...</div>
+      <div id="logs" class="logs">等待连接本地引擎...</div>
     </div>
   </div>
   <script src="./app.js"></script>

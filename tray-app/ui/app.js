@@ -7,11 +7,11 @@ let lastProfilesKey = "";
 let lastApprovalsKey = "";
 
 const stateLabels = {
-  running: "运行中（双向同步 + 本地执行 + 端口预览就绪）",
-  starting: "正在连接云端...",
+  running: "运行中",
+  starting: "连接中...",
   stopped: "已停止",
-  conflict: "另一台设备正在同步",
-  lock_lost: "已被其他设备接管（已自动暂停）",
+  conflict: "设备锁冲突",
+  lock_lost: "已被其他设备接管",
   error: "连接异常",
 };
 
@@ -58,12 +58,12 @@ function renderApprovals(list) {
   lastApprovalsKey = key;
 
   container.innerHTML = items.map((item) => `
-    <div style="background:#0c1326;border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:10px;">
-      <div style="font-size:12px;color:#fcd34d;margin-bottom:4px;">风险项：${escapeHTML(item.reason)}</div>
-      <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fff;background:#080d1a;padding:6px 8px;border-radius:6px;word-break:break-all;margin-bottom:8px;">${escapeHTML(item.command)}</div>
-      <div style="display:flex;gap:8px;">
-        <button data-approve="${escapeHTML(item.job_id)}" class="btn-primary" style="padding:5px 12px;font-size:12px;">允许执行</button>
-        <button data-reject="${escapeHTML(item.job_id)}" class="btn-danger" style="padding:5px 12px;font-size:12px;">拒绝</button>
+    <div class="approval-item">
+      <div class="approval-reason">${escapeHTML(item.reason)}</div>
+      <div class="approval-cmd">${escapeHTML(item.command)}</div>
+      <div style="display:flex;gap:6px;">
+        <button data-approve="${escapeHTML(item.job_id)}" class="btn-primary" style="height:26px;padding:0 10px;font-size:11.5px;">允许执行</button>
+        <button data-reject="${escapeHTML(item.job_id)}" class="btn-danger" style="height:26px;padding:0 10px;font-size:11.5px;">拒绝</button>
       </div>
     </div>
   `).join("");
@@ -102,7 +102,7 @@ function renderProfiles(profiles, currentDir) {
   if (key === lastProfilesKey) return;
   lastProfilesKey = key;
 
-  select.innerHTML = `<option value="">-- 选择已保存项目 (${list.length}) --</option>` +
+  select.innerHTML = `<option value="">选择已收藏项目 (${list.length})</option>` +
     list.map((p) => `<option value="${escapeHTML(p.dir)}" ${p.dir === currentDir ? "selected" : ""}>${escapeHTML(p.name)} — ${escapeHTML(p.dir)}</option>`).join("");
 }
 
@@ -122,15 +122,15 @@ function render(st) {
 
   const state = st.state || "stopped";
   el("status-dot").className = "dot " + state;
-  el("status-badge").className = "badge " + state;
-  el("status-badge").textContent = isBound ? (stateLabels[state] || state) : "未绑定设备";
+  el("status-badge").className = "status-pill badge " + state;
+  el("status-text").textContent = isBound ? (stateLabels[state] || state) : "未绑定";
 
   el("meta-account").textContent = `${st.username || "-"} @ ${st.server || "-"}`;
-  el("meta-device").textContent = `${st.device_name || "-"} (${st.os || "-"})${st.encrypted ? " · 🔒 AES-256-GCM" : ""}`;
+  el("meta-device").textContent = `${st.device_name || "-"} · ${st.os || "-"}${st.encrypted ? " · AES-256" : ""}`;
   if (state === "running") {
-    el("meta-lock").textContent = `本机已持有（Epoch #${st.epoch || 1}）`;
+    el("meta-lock").textContent = `已持有 · Epoch #${st.epoch || 1}`;
   } else if (st.locked_by) {
-    el("meta-lock").textContent = `由 ${st.locked_by.device_name || st.locked_by.device_id} (${st.locked_by.os}) 持有`;
+    el("meta-lock").textContent = `${st.locked_by.device_name || st.locked_by.device_id} (${st.locked_by.os})`;
   } else {
     el("meta-lock").textContent = "未持有";
   }
@@ -153,7 +153,7 @@ async function poll() {
     const st = await callAPI("/local/status");
     render(st);
   } catch {
-    el("status-badge").textContent = "正在启动本地引擎...";
+    el("status-text").textContent = "启动引擎中...";
   }
 }
 

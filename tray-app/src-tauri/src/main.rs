@@ -1,7 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, RunEvent, WindowEvent,
@@ -11,6 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
 struct SidecarState(Mutex<Option<CommandChild>>);
+static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 fn pick_folder(app: tauri::AppHandle) -> Option<String> {
@@ -54,23 +59,20 @@ fn main() {
         .manage(SidecarState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![pick_folder, open_url])
         .setup(|app| {
-            // Keep macOS app cleanly in the top Menu Bar without cluttering the Dock
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-            // Spawn bundled Go sync-agent sidecar in local control API mode
-            let sidecar_cmd = app
-                .shell()
-                .sidecar("sync-agent")
-                .expect("failed to locate sync-agent sidecar")
-                .args(["-serve", "-addr", "127.0.0.1:17890"]);
-
-            if let Ok((_rx, child)) = sidecar_cmd.spawn() {
-                if let Some(state) = app.try_state::<SidecarState>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        *guard = Some(child);
+            // Spawn bundled Go sync-agent sidecar in local control API mode (non-fatal if already running)
+            match app.shell().sidecar("sync-agent") {
+                Ok(cmd) => match cmd.args(["-serve", "-addr", "127.0.0.1:17890"]).spawn() {
+                    Ok((_rx, child)) => {
+                        if let Some(state) = app.try_state::<SidecarState>() {
+                            if let Ok(mut guard) = state.0.lock() {
+                                *guard = Some(child);
+                            }
+                        }
+                        eprintln!("[tray] sync-agent sidecar started on 127.0.0.1:17890");
                     }
-                }
+                    Err(e) => eprintln!("[tray] failed to spawn sync-agent sidecar: {e}"),
+                },
+                Err(e) => eprintln!("[tray] failed to locate sync-agent sidecar: {e}"),
             }
 
             // Build native Menu Bar / System Tray menu
@@ -80,9 +82,11 @@ fn main() {
             let item_quit = MenuItem::with_id(app, "quit", "退出 Super-Agent", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&item_open, &item_web, &sep, &item_quit])?;
 
-            let mut tray_builder = TrayIconBuilder::new()
+            let mut tray_builder = TrayIconBuilder::with_id("super-agent-tray")
                 .menu(&menu)
+                .title("SA")
                 .tooltip("Super-Agent 本地伴侣")
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open_panel" => show_main_window(app),
                     "open_web" => {
@@ -91,6 +95,7 @@ fn main() {
                             .open_url("http://localhost:8080", None::<&str>);
                     }
                     "quit" => {
+                        IS_QUITTING.store(true, Ordering::SeqCst);
                         stop_sidecar(app);
                         app.exit(0);
                     }
@@ -107,26 +112,41 @@ fn main() {
                     }
                 });
 
-            if let Some(icon) = app.default_window_icon() {
+            if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                tray_builder = tray_builder.icon(icon);
+            } else if let Some(icon) = app.default_window_icon() {
                 tray_builder = tray_builder.icon(icon.clone());
             }
             tray_builder.build(app)?;
+
+            // Ensure the main window stays visible and focused on initial launch
+            show_main_window(app.handle());
 
             Ok(())
         })
         .on_window_event(|window, event| {
             // Hide to tray/menu bar when user clicks close button instead of quitting
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                if !IS_QUITTING.load(Ordering::SeqCst) {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building Super-Agent tray app");
 
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { api, .. } => {
+            if !IS_QUITTING.load(Ordering::SeqCst) {
+                api.prevent_exit();
+            } else {
+                stop_sidecar(app_handle);
+            }
+        }
+        RunEvent::Exit => {
             stop_sidecar(app_handle);
         }
+        _ => {}
     });
 }

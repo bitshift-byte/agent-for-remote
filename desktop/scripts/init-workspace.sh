@@ -163,9 +163,9 @@ EOF
   <property name="general" type="empty">
     <property name="theme" type="string" value="${GTK_THEME}"/>
     <property name="title_font" type="string" value="Noto Sans CJK SC Medium ${INIT_UI_FONT}"/>
-    <property name="use_compositing" type="bool" value="true"/>
-    <property name="show_frame_shadow" type="bool" value="true"/>
-    <property name="show_popup_shadow" type="bool" value="true"/>
+    <property name="use_compositing" type="bool" value="false"/>
+    <property name="show_frame_shadow" type="bool" value="false"/>
+    <property name="show_popup_shadow" type="bool" value="false"/>
     <property name="button_layout" type="string" value="CHM|O"/>
     <property name="placement_mode" type="string" value="center"/>
     <property name="placement_ratio" type="int" value="20"/>

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,12 +20,12 @@ const DesktopSubfolder = "/desktop/"
 var validNameRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 type DesktopStatus struct {
-	Username      string `json:"username"`
-	ContainerName string `json:"container_name"`
-	State         string `json:"state"` // "running", "paused", "stopped", "not_created"
-	Ready         bool   `json:"ready"`
-	DesktopURL    string `json:"desktop_url"`
-	MemoryMB      int64  `json:"memory_mb"`
+	Username      string  `json:"username"`
+	ContainerName string  `json:"container_name"`
+	State         string  `json:"state"` // "running", "paused", "stopped", "not_created"
+	Ready         bool    `json:"ready"`
+	DesktopURL    string  `json:"desktop_url"`
+	MemoryMB      int64   `json:"memory_mb"`
 	CPUs          float64 `json:"cpus"`
 }
 
@@ -336,14 +337,55 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 	if m.cfg.DesktopTheme != "" {
 		env = append(env, "DESKTOP_THEME="+m.cfg.DesktopTheme)
 	}
-	if m.cfg.SelkiesPaintOverQuality != "" {
-		env = append(env, "SELKIES_USE_PAINT_OVER_QUALITY="+m.cfg.SelkiesPaintOverQuality)
+	// Low-latency streaming env. SELKIES_EXTRA_ENV pairs override these
+	// (applied last, keyed by name, so no duplicate keys reach Docker).
+	selkiesEnv := map[string]string{
+		"SELKIES_USE_PAINT_OVER_QUALITY":  m.cfg.SelkiesPaintOverQuality,
+		"SELKIES_VIDEO_STREAMING_MODE":    strconv.FormatBool(m.cfg.SelkiesVideoStreamingMode),
+		"SELKIES_RATE_CONTROL_MODE":       m.cfg.SelkiesRateControlMode,
+		"SELKIES_VIDEO_BITRATE":           m.cfg.SelkiesVideoBitrate,
+		"SELKIES_FRAMERATE":               m.cfg.SelkiesFramerate,
+		"SELKIES_ENCODER":                 m.cfg.SelkiesEncoder,
+		"SELKIES_ENABLE_RESIZE":           strconv.FormatBool(m.cfg.SelkiesEnableResize),
+		"SELKIES_BACKPRESSURE_QUEUE_SIZE": strconv.Itoa(m.cfg.SelkiesBackpressureQueueSize),
+		"SELKIES_CONGESTION_CONTROL":      strconv.FormatBool(m.cfg.SelkiesCongestionControl),
+	}
+	if m.cfg.SelkiesManualWidth > 0 {
+		selkiesEnv["SELKIES_MANUAL_WIDTH"] = strconv.Itoa(m.cfg.SelkiesManualWidth)
+	}
+	if m.cfg.SelkiesManualHeight > 0 {
+		selkiesEnv["SELKIES_MANUAL_HEIGHT"] = strconv.Itoa(m.cfg.SelkiesManualHeight)
 	}
 	if m.cfg.SelkiesExtraEnv != "" {
 		for _, pair := range strings.Split(m.cfg.SelkiesExtraEnv, ",") {
 			pair = strings.TrimSpace(pair)
-			if pair != "" && strings.Contains(pair, "=") {
-				env = append(env, pair)
+			if k, v, ok := strings.Cut(pair, "="); ok && strings.TrimSpace(k) != "" {
+				selkiesEnv[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			}
+		}
+	}
+	for _, k := range []string{
+		"SELKIES_USE_PAINT_OVER_QUALITY", "SELKIES_VIDEO_STREAMING_MODE",
+		"SELKIES_RATE_CONTROL_MODE", "SELKIES_VIDEO_BITRATE", "SELKIES_FRAMERATE",
+		"SELKIES_ENCODER", "SELKIES_MANUAL_WIDTH", "SELKIES_MANUAL_HEIGHT",
+		"SELKIES_ENABLE_RESIZE", "SELKIES_BACKPRESSURE_QUEUE_SIZE",
+		"SELKIES_CONGESTION_CONTROL",
+	} {
+		if v, ok := selkiesEnv[k]; ok && v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
+	// Any other SELKIES_EXTRA_ENV keys not covered above.
+	for k, v := range selkiesEnv {
+		switch k {
+		case "SELKIES_USE_PAINT_OVER_QUALITY", "SELKIES_VIDEO_STREAMING_MODE",
+			"SELKIES_RATE_CONTROL_MODE", "SELKIES_VIDEO_BITRATE", "SELKIES_FRAMERATE",
+			"SELKIES_ENCODER", "SELKIES_MANUAL_WIDTH", "SELKIES_MANUAL_HEIGHT",
+			"SELKIES_ENABLE_RESIZE", "SELKIES_BACKPRESSURE_QUEUE_SIZE",
+			"SELKIES_CONGESTION_CONTROL":
+		default:
+			if v != "" {
+				env = append(env, k+"="+v)
 			}
 		}
 	}

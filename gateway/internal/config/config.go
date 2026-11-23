@@ -9,29 +9,44 @@ import (
 )
 
 type Config struct {
-	Port            string
-	JWTSecret       string
-	JWTTTL          time.Duration
-	CookieSecure    bool
-	Users           map[string]string
-	DockerHost      string
-	DockerNetwork   string
-	DesktopImage    string
+	Port             string
+	JWTSecret        string
+	JWTTTL           time.Duration
+	CookieSecure     bool
+	Users            map[string]string
+	DockerHost       string
+	DockerNetwork    string
+	DesktopImage     string
 	DesktopMemoryMB  int64
 	DesktopCPUs      float64
 	DesktopShmMB     int64
 	DesktopTZ        string
-	DesktopDPI              string
-	DesktopFontSize         string
-	DesktopTheme            string
-	DesktopIdlePause        time.Duration
-	SelkiesPaintOverQuality string
-	SelkiesExtraEnv         string
-	StartTimeout            time.Duration
-	MockDesktop             bool
-	WorkspaceDataDir string
-	WorkspaceHostDir string
-	SyncLockTTL      time.Duration
+	DesktopDPI       string
+	DesktopFontSize  string
+	DesktopTheme     string
+	DesktopIdlePause time.Duration
+	// Performance profile: "smooth" (default, latency-first) or "quality".
+	// smooth: CBR + congestion control, streaming mode, paint-over off,
+	// 30fps, 1280x720 locked, striped x264 encoder, small backpressure queue.
+	// quality: the old defaults (CRF, paint-over on, no streaming mode).
+	PerformanceProfile           string
+	SelkiesPaintOverQuality      string
+	SelkiesVideoStreamingMode    bool
+	SelkiesRateControlMode       string
+	SelkiesVideoBitrate          string
+	SelkiesFramerate             string
+	SelkiesEncoder               string
+	SelkiesManualWidth           int
+	SelkiesManualHeight          int
+	SelkiesEnableResize          bool
+	SelkiesBackpressureQueueSize int
+	SelkiesCongestionControl     bool
+	SelkiesExtraEnv              string
+	StartTimeout                 time.Duration
+	MockDesktop                  bool
+	WorkspaceDataDir             string
+	WorkspaceHostDir             string
+	SyncLockTTL                  time.Duration
 
 	// Runtime AI provider env vars injected into user containers (never written to /workspace)
 	AnthropicAPIKey         string
@@ -59,37 +74,61 @@ func Load() (*Config, error) {
 		dockerHost = "unix://" + legacy
 	}
 
+	// Low-latency streaming profile. Individual SELKIES_* vars below still
+	// override the profile defaults, and SELKIES_EXTRA_ENV overrides all.
+	profile := strings.ToLower(strings.TrimSpace(getEnv("DESKTOP_PERFORMANCE_PROFILE", "smooth")))
+	smooth := profile != "quality"
+	paintOver, streamingMode, rateMode := "false", true, "cbr"
+	bitrate, framerate, encoder := "2500", "30", "h264enc-striped,h264enc,jpeg"
+	manualW, manualH, enableResize, backpressure := 1280, 720, false, 30
+	if !smooth {
+		paintOver, streamingMode, rateMode = "true", false, "crf"
+		bitrate, framerate, encoder = "", "", ""
+		manualW, manualH, enableResize, backpressure = 0, 0, true, 120
+	}
+
 	cfg := &Config{
-		Port:                    port,
-		JWTSecret:               jwtSecret,
-		JWTTTL:                  time.Duration(ttlHours) * time.Hour,
-		CookieSecure:            cookieSecure,
-		Users:                   users,
-		DockerHost:              dockerHost,
-		DockerNetwork:           getEnv("DOCKER_NETWORK", "super-agent-net"),
-		DesktopImage:            getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
-		DesktopMemoryMB:         int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
-		DesktopCPUs:             getEnvFloat("DESKTOP_CPUS", 2.0),
-		DesktopShmMB:            int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
-		DesktopTZ:               getEnv("DESKTOP_TZ", "Asia/Shanghai"),
-		DesktopDPI:              strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
-		DesktopFontSize:         strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
-		DesktopTheme:            strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
-		DesktopIdlePause:        time.Duration(getEnvNonNegInt("DESKTOP_IDLE_PAUSE_MIN", 30)) * time.Minute,
-		SelkiesPaintOverQuality: getEnv("SELKIES_USE_PAINT_OVER_QUALITY", "true"),
-		SelkiesExtraEnv:         strings.TrimSpace(os.Getenv("SELKIES_EXTRA_ENV")),
-		StartTimeout:            time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
-		MockDesktop:             getEnvBool("MOCK_DESKTOP", false),
-		WorkspaceDataDir:        getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),
-		WorkspaceHostDir:        strings.TrimRight(strings.TrimSpace(os.Getenv("WORKSPACE_HOST_DIR")), "/"),
-		SyncLockTTL:             time.Duration(getEnvInt("SYNC_LOCK_TTL_SEC", 60)) * time.Second,
-		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
-		AnthropicBaseURL:        os.Getenv("ANTHROPIC_BASE_URL"),
-		AnthropicModel:          strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")),
-		AnthropicSmallFastModel: strings.TrimSpace(os.Getenv("ANTHROPIC_SMALL_FAST_MODEL")),
-		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:           os.Getenv("OPENAI_BASE_URL"),
-		CodexModel:              strings.TrimSpace(os.Getenv("CODEX_MODEL")),
+		Port:                         port,
+		JWTSecret:                    jwtSecret,
+		JWTTTL:                       time.Duration(ttlHours) * time.Hour,
+		CookieSecure:                 cookieSecure,
+		Users:                        users,
+		DockerHost:                   dockerHost,
+		DockerNetwork:                getEnv("DOCKER_NETWORK", "super-agent-net"),
+		DesktopImage:                 getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
+		DesktopMemoryMB:              int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
+		DesktopCPUs:                  getEnvFloat("DESKTOP_CPUS", 4.0),
+		DesktopShmMB:                 int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
+		DesktopTZ:                    getEnv("DESKTOP_TZ", "Asia/Shanghai"),
+		DesktopDPI:                   strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
+		DesktopFontSize:              strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
+		DesktopTheme:                 strings.TrimSpace(os.Getenv("DESKTOP_THEME")),
+		DesktopIdlePause:             time.Duration(getEnvNonNegInt("DESKTOP_IDLE_PAUSE_MIN", 30)) * time.Minute,
+		PerformanceProfile:           profile,
+		SelkiesPaintOverQuality:      getEnv("SELKIES_USE_PAINT_OVER_QUALITY", paintOver),
+		SelkiesVideoStreamingMode:    getEnvBool("SELKIES_VIDEO_STREAMING_MODE", streamingMode),
+		SelkiesRateControlMode:       getEnv("SELKIES_RATE_CONTROL_MODE", rateMode),
+		SelkiesVideoBitrate:          getEnv("SELKIES_VIDEO_BITRATE", bitrate),
+		SelkiesFramerate:             getEnv("SELKIES_FRAMERATE", framerate),
+		SelkiesEncoder:               getEnv("SELKIES_ENCODER", encoder),
+		SelkiesManualWidth:           getEnvInt("SELKIES_MANUAL_WIDTH", manualW),
+		SelkiesManualHeight:          getEnvInt("SELKIES_MANUAL_HEIGHT", manualH),
+		SelkiesEnableResize:          getEnvBool("SELKIES_ENABLE_RESIZE", enableResize),
+		SelkiesBackpressureQueueSize: getEnvInt("SELKIES_BACKPRESSURE_QUEUE_SIZE", backpressure),
+		SelkiesCongestionControl:     getEnvBool("SELKIES_CONGESTION_CONTROL", true),
+		SelkiesExtraEnv:              strings.TrimSpace(os.Getenv("SELKIES_EXTRA_ENV")),
+		StartTimeout:                 time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
+		MockDesktop:                  getEnvBool("MOCK_DESKTOP", false),
+		WorkspaceDataDir:             getEnv("WORKSPACE_DATA_DIR", "/data/workspaces"),
+		WorkspaceHostDir:             strings.TrimRight(strings.TrimSpace(os.Getenv("WORKSPACE_HOST_DIR")), "/"),
+		SyncLockTTL:                  time.Duration(getEnvInt("SYNC_LOCK_TTL_SEC", 60)) * time.Second,
+		AnthropicAPIKey:              os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL:             os.Getenv("ANTHROPIC_BASE_URL"),
+		AnthropicModel:               strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")),
+		AnthropicSmallFastModel:      strings.TrimSpace(os.Getenv("ANTHROPIC_SMALL_FAST_MODEL")),
+		OpenAIAPIKey:                 os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:                os.Getenv("OPENAI_BASE_URL"),
+		CodexModel:                   strings.TrimSpace(os.Getenv("CODEX_MODEL")),
 	}
 
 	return cfg, nil

@@ -3,6 +3,7 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,15 @@ import (
 )
 
 type PairClaimResponse struct {
-	DeviceID    string `json:"device_id"`
-	DeviceName  string `json:"device_name"`
-	OS          string `json:"os"`
-	Username    string `json:"username"`
-	DeviceToken string `json:"device_token"`
+	DeviceID            string `json:"device_id"`
+	DeviceName          string `json:"device_name"`
+	OS                  string `json:"os"`
+	Username            string `json:"username"`
+	DeviceToken         string `json:"device_token"`
+	EncryptedPayloadKey string `json:"encrypted_payload_key,omitempty"`
+	PairSalt            string `json:"pair_salt,omitempty"`
+	EncScheme           string `json:"enc_scheme,omitempty"`
+	PayloadKeyB64       string `json:"-"` // Unwrapped locally using the 6-char pairing code
 }
 
 // ParseBindInput parses either a full bind string (`super-agent://pair?server=...&code=XXX-XXX`)
@@ -53,7 +58,8 @@ func ParseBindInput(input, fallbackServer string) (serverURL, code string, err e
 	return strings.TrimRight(serverURL, "/"), strings.TrimSpace(code), nil
 }
 
-// ClaimPairingCode exchanges a 6-character pairing code for a dedicated DeviceToken (no password needed).
+// ClaimPairingCode exchanges a 6-character pairing code for a dedicated DeviceToken
+// and unwraps the 256-bit AES-GCM payload encryption key using the pairing code.
 func (c *Client) ClaimPairingCode(ctx context.Context, code, deviceID, deviceName, osName string) (*PairClaimResponse, error) {
 	payload, _ := json.Marshal(map[string]string{
 		"code":        code,
@@ -91,6 +97,16 @@ func (c *Client) ClaimPairingCode(ctx context.Context, code, deviceID, deviceNam
 	if out.DeviceToken == "" {
 		return nil, errors.New("服务端未返回有效设备凭证")
 	}
+
+	if out.EncryptedPayloadKey != "" && out.PairSalt != "" {
+		key, err := UnwrapPayloadKey(code, deviceID, out.EncryptedPayloadKey, out.PairSalt)
+		if err != nil {
+			return nil, fmt.Errorf("配对码解封 AES-256 密钥失败: %w", err)
+		}
+		out.PayloadKeyB64 = base64.StdEncoding.EncodeToString(key)
+		c.SetPayloadKey(key)
+	}
+
 	c.token = out.DeviceToken
 	c.deviceID = out.DeviceID
 	return &out, nil

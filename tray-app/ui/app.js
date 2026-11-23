@@ -54,7 +54,7 @@ function render(st) {
   el("status-badge").textContent = isBound ? (stateLabels[state] || state) : "未绑定设备";
 
   el("meta-account").textContent = `${st.username || "-"} @ ${st.server || "-"}`;
-  el("meta-device").textContent = `${st.device_name || "-"} (${st.os || "-"})`;
+  el("meta-device").textContent = `${st.device_name || "-"} (${st.os || "-"})${st.encrypted ? " · 🔒 AES-256-GCM" : ""}`;
   if (state === "running") {
     el("meta-lock").textContent = `本机已持有（Epoch #${st.epoch || 1}）`;
   } else if (st.locked_by) {

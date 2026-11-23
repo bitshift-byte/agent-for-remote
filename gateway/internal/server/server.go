@@ -254,6 +254,17 @@ func extractToken(r *http.Request) string {
 	return ""
 }
 
+func (s *Server) requestPayloadKey(r *http.Request) []byte {
+	if s.devices == nil {
+		return nil
+	}
+	tok := extractToken(r)
+	if tok == "" {
+		return nil
+	}
+	return s.devices.GetPayloadKey(tok)
+}
+
 func writeJSON(w http.ResponseWriter, code int, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)

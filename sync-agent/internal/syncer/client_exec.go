@@ -3,7 +3,9 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +43,9 @@ func (c *Client) PollExecJob(ctx context.Context, timeoutSec int) (*ExecJob, err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if len(c.payloadKey) == 32 {
+		req.Header.Set(HeaderAcceptEnc, EncSchemeAES256GCM)
+	}
 
 	pollClient := &http.Client{
 		Transport: c.httpClient.Transport,
@@ -64,6 +69,31 @@ func (c *Client) PollExecJob(ctx context.Context, timeoutSec int) (*ExecJob, err
 	}
 
 	var job ExecJob
+	if resp.Header.Get(HeaderEnc) == EncSchemeAES256GCM {
+		if len(c.payloadKey) != 32 {
+			return nil, errors.New("received encrypted exec job without local AES-256 key")
+		}
+		var env struct {
+			Enc     string `json:"enc"`
+			Payload string `json:"payload"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+			return nil, err
+		}
+		sealed, err := base64.StdEncoding.DecodeString(env.Payload)
+		if err != nil {
+			return nil, err
+		}
+		plain, err := DecryptAESGCM(c.payloadKey, sealed, []byte("exec-job"))
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(plain, &job); err != nil {
+			return nil, err
+		}
+		return &job, nil
+	}
+
 	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
 		return nil, err
 	}
@@ -71,17 +101,43 @@ func (c *Client) PollExecJob(ctx context.Context, timeoutSec int) (*ExecJob, err
 }
 
 func (c *Client) SubmitExecResult(ctx context.Context, res ExecResult) error {
-	payload, err := json.Marshal(res)
-	if err != nil {
-		return err
+	var bodyBytes []byte
+	var encrypted bool
+	if len(c.payloadKey) == 32 {
+		plain, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+		sealed, err := EncryptAESGCM(c.payloadKey, plain, []byte("exec-result"))
+		if err != nil {
+			return err
+		}
+		bodyBytes, err = json.Marshal(map[string]string{
+			"enc":     EncSchemeAES256GCM,
+			"payload": base64.StdEncoding.EncodeToString(sealed),
+		})
+		if err != nil {
+			return err
+		}
+		encrypted = true
+	} else {
+		var err error
+		bodyBytes, err = json.Marshal(res)
+		if err != nil {
+			return err
+		}
 	}
-	req, err := c.newAuthedRequest(ctx, http.MethodPost, "/api/exec/result", bytes.NewReader(payload))
+
+	req, err := c.newAuthedRequest(ctx, http.MethodPost, "/api/exec/result", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if encrypted {
+		req.Header.Set(HeaderEnc, EncSchemeAES256GCM)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

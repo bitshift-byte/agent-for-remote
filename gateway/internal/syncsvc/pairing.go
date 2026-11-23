@@ -33,13 +33,17 @@ type PairingCode struct {
 }
 
 type BoundDevice struct {
-	DeviceID    string    `json:"device_id"`
-	DeviceName  string    `json:"device_name"`
-	OS          string    `json:"os"`
-	Username    string    `json:"username"`
-	DeviceToken string    `json:"device_token,omitempty"`
-	BoundAt     time.Time `json:"bound_at"`
-	LastSeen    time.Time `json:"last_seen"`
+	DeviceID            string    `json:"device_id"`
+	DeviceName          string    `json:"device_name"`
+	OS                  string    `json:"os"`
+	Username            string    `json:"username"`
+	DeviceToken         string    `json:"device_token,omitempty"`
+	PayloadKeyB64       string    `json:"payload_key_b64,omitempty"`
+	EncryptedPayloadKey string    `json:"encrypted_payload_key,omitempty"`
+	PairSalt            string    `json:"pair_salt,omitempty"`
+	EncScheme           string    `json:"enc_scheme,omitempty"`
+	BoundAt             time.Time `json:"bound_at"`
+	LastSeen            time.Time `json:"last_seen"`
 }
 
 type DeviceRegistry struct {
@@ -117,24 +121,39 @@ func (r *DeviceRegistry) ClaimPairingCode(code, deviceID, deviceName, osName str
 	}
 
 	token := deviceTokenPrefix + randomHex(32)
+	payloadKey, err := GenerateRandomBytes(32)
+	if err != nil {
+		return nil, err
+	}
+	wrappedKey, saltB64, err := WrapPayloadKey(norm, deviceID, payloadKey)
+	if err != nil {
+		return nil, err
+	}
+
 	if strings.TrimSpace(deviceName) == "" {
 		deviceName = deviceID
 	}
 	dev := &BoundDevice{
-		DeviceID:    deviceID,
-		DeviceName:  strings.TrimSpace(deviceName),
-		OS:          strings.TrimSpace(osName),
-		Username:    pc.Username,
-		DeviceToken: token,
-		BoundAt:     now,
-		LastSeen:    now,
+		DeviceID:      deviceID,
+		DeviceName:    strings.TrimSpace(deviceName),
+		OS:            strings.TrimSpace(osName),
+		Username:      pc.Username,
+		DeviceToken:   token,
+		PayloadKeyB64: encodeB64(payloadKey),
+		EncScheme:     EncSchemeAES256GCM,
+		BoundAt:       now,
+		LastSeen:      now,
 	}
 	r.devices[deviceID] = dev
 	r.tokenToDevID[token] = deviceID
 	r.saveLocked()
 
-	cp := *dev
-	return &cp, nil
+	// Never send plaintext PayloadKeyB64 over the wire; send only the pair-code-wrapped key + salt
+	resp := *dev
+	resp.PayloadKeyB64 = ""
+	resp.EncryptedPayloadKey = wrappedKey
+	resp.PairSalt = saltB64
+	return &resp, nil
 }
 
 // VerifyDeviceToken validates a dev_... token and returns its associated username and deviceID.
@@ -157,7 +176,30 @@ func (r *DeviceRegistry) VerifyDeviceToken(token string) (string, string, bool) 
 	return dev.Username, dev.DeviceID, true
 }
 
-// ListByUser returns all bound devices for username with secret tokens redacted.
+// GetPayloadKey returns the 32-byte AES-256-GCM key associated with a bound device token.
+func (r *DeviceRegistry) GetPayloadKey(token string) []byte {
+	if !strings.HasPrefix(token, deviceTokenPrefix) {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	devID, ok := r.tokenToDevID[token]
+	if !ok {
+		return nil
+	}
+	dev, ok := r.devices[devID]
+	if !ok || dev.PayloadKeyB64 == "" {
+		return nil
+	}
+	key, err := decodeB64(dev.PayloadKeyB64)
+	if err != nil || len(key) != 32 {
+		return nil
+	}
+	return key
+}
+
+// ListByUser returns all bound devices for username with secret tokens and keys redacted.
 func (r *DeviceRegistry) ListByUser(username string) []BoundDevice {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -167,6 +209,7 @@ func (r *DeviceRegistry) ListByUser(username string) []BoundDevice {
 		if d.Username == username {
 			cp := *d
 			cp.DeviceToken = ""
+			cp.PayloadKeyB64 = ""
 			out = append(out, cp)
 		}
 	}

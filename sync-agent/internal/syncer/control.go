@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,19 +18,21 @@ import (
 )
 
 type LocalConfig struct {
-	Server      string `json:"server"`
-	Username    string `json:"username"`
-	DeviceToken string `json:"device_token,omitempty"`
-	Token       string `json:"token,omitempty"`
-	Dir         string `json:"dir"`
-	DeviceName  string `json:"device_name"`
-	IntervalMs  int    `json:"interval_ms"`
+	Server        string `json:"server"`
+	Username      string `json:"username"`
+	DeviceToken   string `json:"device_token,omitempty"`
+	PayloadKeyB64 string `json:"payload_key_b64,omitempty"`
+	Token         string `json:"token,omitempty"`
+	Dir           string `json:"dir"`
+	DeviceName    string `json:"device_name"`
+	IntervalMs    int    `json:"interval_ms"`
 }
 
 type StatusSnapshot struct {
 	State      string      `json:"state"` // "stopped", "starting", "running", "conflict", "lock_lost", "error"
 	Running    bool        `json:"running"`
 	Bound      bool        `json:"bound"`
+	Encrypted  bool        `json:"encrypted"`
 	LastError  string      `json:"last_error,omitempty"`
 	LockedBy   *DeviceLock `json:"locked_by,omitempty"`
 	Epoch      int64       `json:"epoch,omitempty"`
@@ -137,6 +140,9 @@ func (c *Controller) loadConfig() {
 		if loaded.DeviceToken != "" {
 			c.cfg.DeviceToken = loaded.DeviceToken
 		}
+		if loaded.PayloadKeyB64 != "" {
+			c.cfg.PayloadKeyB64 = loaded.PayloadKeyB64
+		}
 		if loaded.Token != "" {
 			c.cfg.Token = loaded.Token
 		}
@@ -180,6 +186,7 @@ func (c *Controller) Status() StatusSnapshot {
 		State:      c.state,
 		Running:    c.state == "running" || c.state == "starting",
 		Bound:      bound,
+		Encrypted:  c.cfg.PayloadKeyB64 != "",
 		LastError:  c.lastError,
 		LockedBy:   lockedCopy,
 		Epoch:      c.epoch,
@@ -223,6 +230,7 @@ func (c *Controller) Pair(input, fallbackServer, dir, deviceName string) error {
 	c.cfg.Server = serverURL
 	c.cfg.Username = claimed.Username
 	c.cfg.DeviceToken = claimed.DeviceToken
+	c.cfg.PayloadKeyB64 = claimed.PayloadKeyB64
 	c.cfg.Token = "" // Clear any legacy password once bound via DeviceToken
 	if strings.TrimSpace(dir) != "" {
 		c.cfg.Dir = strings.TrimSpace(dir)
@@ -248,6 +256,7 @@ func (c *Controller) Unbind() error {
 	c.Stop()
 	c.mu.Lock()
 	c.cfg.DeviceToken = ""
+	c.cfg.PayloadKeyB64 = ""
 	c.cfg.Token = ""
 	c.cfg.Username = ""
 	err := c.saveConfigLocked()
@@ -354,7 +363,14 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 	client := NewClient(cfg.Server)
 	if cfg.DeviceToken != "" {
 		client.SetSession(cfg.DeviceToken, id.DeviceID, "")
-		log.Printf("[tray] authenticating with bound device token for %s on %s", cfg.Username, cfg.Server)
+		if cfg.PayloadKeyB64 != "" {
+			if key, err := base64.StdEncoding.DecodeString(cfg.PayloadKeyB64); err == nil && len(key) == 32 {
+				client.SetPayloadKey(key)
+				log.Printf("[tray] 🔒 AES-256-GCM payload encryption enabled for %s on %s", cfg.Username, cfg.Server)
+			}
+		} else {
+			log.Printf("[tray] authenticating with bound device token for %s on %s", cfg.Username, cfg.Server)
+		}
 	} else {
 		if _, err := client.Login(ctx, cfg.Username, cfg.Token); err != nil {
 			c.setError("error", fmt.Sprintf("登录失败: %v", err), nil)

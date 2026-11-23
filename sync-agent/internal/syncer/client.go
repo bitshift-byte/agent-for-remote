@@ -76,6 +76,7 @@ type Client struct {
 	token      string
 	deviceID   string
 	leaseToken string
+	payloadKey []byte
 }
 
 func NewClient(serverURL string) *Client {
@@ -91,6 +92,14 @@ func (c *Client) SetSession(token, deviceID, leaseToken string) {
 	c.token = token
 	c.deviceID = deviceID
 	c.leaseToken = leaseToken
+}
+
+func (c *Client) SetPayloadKey(key []byte) {
+	if len(key) == 32 {
+		c.payloadKey = append([]byte(nil), key...)
+	} else {
+		c.payloadKey = nil
+	}
 }
 
 func (c *Client) Login(ctx context.Context, username, password string) (string, error) {
@@ -254,6 +263,9 @@ func (c *Client) DownloadFile(ctx context.Context, relPath string) ([]byte, int6
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	if len(c.payloadKey) == 32 {
+		req.Header.Set(HeaderAcceptEnc, EncSchemeAES256GCM)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, 0, 0, err
@@ -269,6 +281,16 @@ func (c *Client) DownloadFile(ctx context.Context, relPath string) ([]byte, int6
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	if resp.Header.Get(HeaderEnc) == EncSchemeAES256GCM {
+		if len(c.payloadKey) != 32 {
+			return nil, 0, 0, errors.New("received encrypted file without local AES-256 key")
+		}
+		plain, decErr := DecryptAESGCM(c.payloadKey, data, []byte(relPath))
+		if decErr != nil {
+			return nil, 0, 0, fmt.Errorf("decrypt %s failed: %w", relPath, decErr)
+		}
+		data = plain
+	}
 	modTime, _ := strconv.ParseInt(resp.Header.Get("X-File-ModTime"), 10, 64)
 	perm := os.FileMode(0o644)
 	if rawMode := resp.Header.Get("X-File-Mode"); rawMode != "" {
@@ -280,14 +302,30 @@ func (c *Client) DownloadFile(ctx context.Context, relPath string) ([]byte, int6
 }
 
 func (c *Client) UploadFile(ctx context.Context, relPath string, fullPath string, modTimeNano int64, perm os.FileMode) (*FileEntry, error) {
-	f, err := os.Open(fullPath)
-	if err != nil {
-		return nil, err
+	var bodyReader io.Reader
+	var encrypted bool
+	if len(c.payloadKey) == 32 {
+		plain, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		sealed, err := EncryptAESGCM(c.payloadKey, plain, []byte(relPath))
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(sealed)
+		encrypted = true
+	} else {
+		f, err := os.Open(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		bodyReader = f
 	}
-	defer f.Close()
 
 	endpoint := "/api/sync/file?path=" + url.QueryEscape(relPath)
-	req, err := c.newAuthedRequest(ctx, http.MethodPut, endpoint, f)
+	req, err := c.newAuthedRequest(ctx, http.MethodPut, endpoint, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +333,9 @@ func (c *Client) UploadFile(ctx context.Context, relPath string, fullPath string
 	req.Header.Set("X-Lease-Token", c.leaseToken)
 	req.Header.Set("X-File-ModTime", strconv.FormatInt(modTimeNano, 10))
 	req.Header.Set("X-File-Mode", strconv.FormatUint(uint64(perm.Perm()), 8))
+	if encrypted {
+		req.Header.Set(HeaderEnc, EncSchemeAES256GCM)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

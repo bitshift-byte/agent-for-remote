@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"super-agent/gateway/internal/execbridge"
+	"super-agent/gateway/internal/syncsvc"
 )
 
 func (s *Server) registerExecRoutes() {
@@ -104,6 +106,27 @@ func (s *Server) handleExecPoll(w http.ResponseWriter, r *http.Request, username
 		return
 	}
 
+	if r.Header.Get(syncsvc.HeaderAcceptEnc) == syncsvc.EncSchemeAES256GCM {
+		if key := s.requestPayloadKey(r); key != nil {
+			plain, err := json.Marshal(job)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			sealed, err := syncsvc.EncryptAESGCM(key, plain, []byte("exec-job"))
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			w.Header().Set(syncsvc.HeaderEnc, syncsvc.EncSchemeAES256GCM)
+			writeJSON(w, http.StatusOK, map[string]string{
+				"enc":     syncsvc.EncSchemeAES256GCM,
+				"payload": base64.StdEncoding.EncodeToString(sealed),
+			})
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, job)
 }
 
@@ -118,10 +141,42 @@ func (s *Server) handleExecResult(w http.ResponseWriter, r *http.Request, userna
 	}
 
 	var res execbridge.ExecResult
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&res); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid result body"})
-		return
+	if r.Header.Get(syncsvc.HeaderEnc) == syncsvc.EncSchemeAES256GCM {
+		key := s.requestPayloadKey(r)
+		if key == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "encrypted exec result sent without bound device key"})
+			return
+		}
+		var env struct {
+			Enc     string `json:"enc"`
+			Payload string `json:"payload"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&env); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid encrypted envelope"})
+			return
+		}
+		sealed, err := base64.StdEncoding.DecodeString(env.Payload)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid base64 payload"})
+			return
+		}
+		plain, err := syncsvc.DecryptAESGCM(key, sealed, []byte("exec-result"))
+		if err != nil {
+			log.Printf("[exec/result] ⛔ decrypt failed user=%s err=%v", username, err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exec result decryption failed"})
+			return
+		}
+		if err := json.Unmarshal(plain, &res); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid decrypted result body"})
+			return
+		}
+	} else {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&res); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid result body"})
+			return
+		}
 	}
+
 	if err := s.execBroker.Complete(res); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

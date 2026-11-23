@@ -153,11 +153,31 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 		}
 		defer f.Close()
 
-		log.Printf("[sync/file] ↓ GET user=%s path=%s size=%d", username, entry.Path, entry.Size)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("X-File-SHA256", entry.SHA256)
 		w.Header().Set("X-File-ModTime", strconv.FormatInt(entry.ModTimeNano, 10))
 		w.Header().Set("X-File-Mode", strconv.FormatUint(uint64(entry.Mode), 8))
+
+		if r.Header.Get(syncsvc.HeaderAcceptEnc) == syncsvc.EncSchemeAES256GCM {
+			if key := s.requestPayloadKey(r); key != nil {
+				plain, readErr := io.ReadAll(io.LimitReader(f, syncsvc.MaxSyncFileSize+1))
+				if readErr != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": readErr.Error()})
+					return
+				}
+				sealed, encErr := syncsvc.EncryptAESGCM(key, plain, []byte(entry.Path))
+				if encErr != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": encErr.Error()})
+					return
+				}
+				w.Header().Set(syncsvc.HeaderEnc, syncsvc.EncSchemeAES256GCM)
+				log.Printf("[sync/file] 🔒 ↓ GET user=%s path=%s size=%d (AES-256-GCM)", username, entry.Path, entry.Size)
+				_, _ = w.Write(sealed)
+				return
+			}
+		}
+
+		log.Printf("[sync/file] ↓ GET user=%s path=%s size=%d", username, entry.Path, entry.Size)
 		_, _ = io.Copy(w, f)
 
 	case http.MethodPut:
@@ -175,13 +195,45 @@ func (s *Server) handleSyncFile(w http.ResponseWriter, r *http.Request, username
 			}
 		}
 
-		entry, err := s.syncSvc.WriteFile(username, relPath, r.Body, modTimeNano, perm)
+		var bodyReader io.Reader = r.Body
+		encrypted := false
+		if r.Header.Get(syncsvc.HeaderEnc) == syncsvc.EncSchemeAES256GCM {
+			key := s.requestPayloadKey(r)
+			if key == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "encrypted payload sent without bound device key"})
+				return
+			}
+			normPath, normErr := syncsvc.NormalizeRelPath(relPath)
+			if normErr != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": normErr.Error()})
+				return
+			}
+			sealed, readErr := io.ReadAll(io.LimitReader(r.Body, syncsvc.MaxSyncFileSize+64))
+			if readErr != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": readErr.Error()})
+				return
+			}
+			plain, decErr := syncsvc.DecryptAESGCM(key, sealed, []byte(normPath))
+			if decErr != nil {
+				log.Printf("[sync/file] ⛔ PUT decrypt failed user=%s path=%s err=%v", username, normPath, decErr)
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "payload decryption failed"})
+				return
+			}
+			bodyReader = strings.NewReader(string(plain))
+			encrypted = true
+		}
+
+		entry, err := s.syncSvc.WriteFile(username, relPath, bodyReader, modTimeNano, perm)
 		if err != nil {
 			log.Printf("[sync/file] PUT error user=%s path=%s err=%v", username, relPath, err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		log.Printf("[sync/file] ↑ PUT user=%s device=%s path=%s size=%d", username, r.Header.Get("X-Device-ID"), entry.Path, entry.Size)
+		if encrypted {
+			log.Printf("[sync/file] 🔒 ↑ PUT user=%s device=%s path=%s size=%d (AES-256-GCM)", username, r.Header.Get("X-Device-ID"), entry.Path, entry.Size)
+		} else {
+			log.Printf("[sync/file] ↑ PUT user=%s device=%s path=%s size=%d", username, r.Header.Get("X-Device-ID"), entry.Path, entry.Size)
+		}
 		writeJSON(w, http.StatusOK, entry)
 
 	case http.MethodDelete:

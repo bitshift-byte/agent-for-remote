@@ -34,6 +34,7 @@ type Manager struct {
 	mu         sync.Mutex
 	userLocks  map[string]*sync.Mutex
 	lastActive map[string]time.Time
+	mockStates map[string]string
 }
 
 func NewManager(client *Client, cfg *config.Config) *Manager {
@@ -42,7 +43,16 @@ func NewManager(client *Client, cfg *config.Config) *Manager {
 		cfg:        cfg,
 		userLocks:  make(map[string]*sync.Mutex),
 		lastActive: make(map[string]time.Time),
+		mockStates: make(map[string]string),
 	}
+}
+
+func (m *Manager) IsMock() bool {
+	return m.cfg.MockDesktop
+}
+
+func (m *Manager) Config() *config.Config {
+	return m.cfg
 }
 
 func (m *Manager) lockForUser(username string) *sync.Mutex {
@@ -98,6 +108,17 @@ func (m *Manager) GetStatus(ctx context.Context, username string) (*DesktopStatu
 		CPUs:          m.cfg.DesktopCPUs,
 	}
 
+	if m.cfg.MockDesktop {
+		m.mu.Lock()
+		st, ok := m.mockStates[username]
+		m.mu.Unlock()
+		if ok {
+			status.State = st
+			status.Ready = st == "running"
+		}
+		return status, nil
+	}
+
 	info, err := m.client.InspectContainer(ctx, name)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -123,11 +144,32 @@ func (m *Manager) EnsureRunning(ctx context.Context, username string) (*DesktopS
 	ulock.Lock()
 	defer ulock.Unlock()
 
+	name := ContainerName(username)
+	if m.cfg.MockDesktop {
+		select {
+		case <-time.After(1200 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		m.mu.Lock()
+		m.mockStates[username] = "running"
+		m.mu.Unlock()
+		m.TouchActivity(username)
+		return &DesktopStatus{
+			Username:      username,
+			ContainerName: name,
+			State:         "running",
+			Ready:         true,
+			DesktopURL:    DesktopSubfolder,
+			MemoryMB:      m.cfg.DesktopMemoryMB,
+			CPUs:          m.cfg.DesktopCPUs,
+		}, nil
+	}
+
 	if err := m.client.EnsureNetwork(ctx, m.cfg.DockerNetwork); err != nil {
 		return nil, err
 	}
 
-	name := ContainerName(username)
 	info, err := m.client.InspectContainer(ctx, name)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
@@ -169,6 +211,13 @@ func (m *Manager) StopDesktop(ctx context.Context, username string) error {
 	ulock := m.lockForUser(username)
 	ulock.Lock()
 	defer ulock.Unlock()
+
+	if m.cfg.MockDesktop {
+		m.mu.Lock()
+		m.mockStates[username] = "stopped"
+		m.mu.Unlock()
+		return nil
+	}
 
 	return m.client.StopContainer(ctx, ContainerName(username), 10)
 }

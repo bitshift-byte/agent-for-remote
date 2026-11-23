@@ -22,6 +22,7 @@ type Config struct {
 	DesktopShmMB    int64
 	DesktopTZ       string
 	StartTimeout    time.Duration
+	MockDesktop     bool
 
 	// Runtime AI provider env vars injected into user containers (never written to /workspace)
 	AnthropicAPIKey  string
@@ -60,6 +61,7 @@ func Load() (*Config, error) {
 		DesktopShmMB:     int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
 		DesktopTZ:        getEnv("DESKTOP_TZ", "Asia/Shanghai"),
 		StartTimeout:     time.Duration(getEnvInt("DESKTOP_START_TIMEOUT_SEC", 60)) * time.Second,
+		MockDesktop:      getEnvBool("MOCK_DESKTOP", false),
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),

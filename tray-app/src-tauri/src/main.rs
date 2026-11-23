@@ -18,12 +18,18 @@ struct SidecarState(Mutex<Option<CommandChild>>);
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
-fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
         .set_title("选择要与云端 /workspace 同步的本地仓库目录")
-        .blocking_pick_folder()
-        .map(|p| p.to_string())
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder.map(|p| p.to_string()));
+        });
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
 }
 
 #[tauri::command]

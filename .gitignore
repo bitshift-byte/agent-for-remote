@@ -7,6 +7,9 @@ gateway/bin/
 gateway/super-agent-gateway
 sync-agent/bin/
 sync-agent/sync.json
+tray-app/node_modules/
+tray-app/src-tauri/target/
+tray-app/src-tauri/binaries/
 
 # Local data volumes (if bind-mounted during dev)
 data/

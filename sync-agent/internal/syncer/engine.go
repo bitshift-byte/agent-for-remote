@@ -73,8 +73,32 @@ func NewEngine(rootDir string, client *Client) (*Engine, error) {
 	return e, nil
 }
 
+func appConfigDir() string {
+	if base, err := os.UserConfigDir(); err == nil && base != "" {
+		dir := filepath.Join(base, "super-agent")
+		if os.MkdirAll(dir, 0o700) == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
+func stateFilePath(absRoot string) string {
+	if cfgDir := appConfigDir(); cfgDir != "" {
+		stateDir := filepath.Join(cfgDir, "state")
+		if os.MkdirAll(stateDir, 0o700) == nil {
+			sum := sha256.Sum256([]byte(absRoot))
+			return filepath.Join(stateDir, hex.EncodeToString(sum[:8])+".json")
+		}
+	}
+	return filepath.Join(absRoot, stateFileName)
+}
+
 func LoadOrCreateDeviceIdentity(rootDir, customName string) (*DeviceIdentity, error) {
 	p := filepath.Join(rootDir, deviceFileName)
+	if cfgDir := appConfigDir(); cfgDir != "" {
+		p = filepath.Join(cfgDir, "device.json")
+	}
 	if raw, err := os.ReadFile(p); err == nil {
 		var id DeviceIdentity
 		if json.Unmarshal(raw, &id) == nil && id.DeviceID != "" {
@@ -474,7 +498,7 @@ func (e *Engine) scanLocal() (map[string]FileEntry, map[string]bool, error) {
 }
 
 func (e *Engine) loadState() {
-	raw, err := os.ReadFile(filepath.Join(e.rootDir, stateFileName))
+	raw, err := os.ReadFile(stateFilePath(e.rootDir))
 	if err != nil {
 		return
 	}
@@ -499,7 +523,7 @@ func (e *Engine) saveState() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(e.rootDir, stateFileName), raw, 0o600)
+	_ = os.WriteFile(stateFilePath(e.rootDir), raw, 0o600)
 }
 
 func hashFile(path string) (string, error) {

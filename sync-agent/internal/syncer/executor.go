@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -121,7 +122,12 @@ func ExecuteJob(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *Ex
 	defer cancel()
 
 	log.Printf("[exec] ▶ running job=%s cwd=%s cmd=%q", job.ID, workDir, rewritten)
-	cmd := exec.CommandContext(execCtx, "/bin/sh", "-c", rewritten)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(execCtx, "cmd", "/C", rewritten)
+	} else {
+		cmd = exec.CommandContext(execCtx, "/bin/sh", "-c", rewritten)
+	}
 	cmd.Dir = workDir
 
 	var stdoutBuf, stderrBuf limitedBuffer

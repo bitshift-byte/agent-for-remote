@@ -20,8 +20,18 @@ type FileConfig struct {
 }
 
 func Main() {
-	cfgFile := flag.String("config", "sync.json", "Path to sync configuration JSON file")
+	serve := flag.Bool("serve", false, "Run local HTTP control API for the desktop tray app")
+	addr := flag.String("addr", "127.0.0.1:17890", "Local control API listen address (used with -serve)")
+	cfgFile := flag.String("config", "sync.json", "Path to sync configuration JSON file (CLI mode)")
 	flag.Parse()
+
+	if *serve {
+		ctrl := NewController()
+		if err := ctrl.ServeControlAPI(*addr); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	raw, err := os.ReadFile(*cfgFile)
 	if err != nil {

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Super-Agent 本地伴侣</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #131b31;
+      --border: #243256;
+      --text: #e6ecf8;
+      --muted: #8fa1c7;
+      --accent: #4f7cff;
+      --accent-hover: #3c67e5;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+    }
+    .app { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 100vh; }
+    .header { display: flex; align-items: center; justify-content: space-between; }
+    .brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+    .dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.starting { background: var(--amber); }
+    .dot.conflict, .dot.lock_lost, .dot.error { background: var(--red); }
+    .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; background: rgba(148,163,184,0.16); color: #cbd5e1; }
+    .badge.running { background: rgba(34,197,94,0.16); color: #86efac; }
+    .badge.starting { background: rgba(245,158,11,0.16); color: #fcd34d; }
+    .badge.conflict, .badge.lock_lost, .badge.error { background: rgba(239,68,68,0.16); color: #fca5a5; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field.full { grid-column: 1 / -1; }
+    label { color: var(--muted); font-size: 12px; }
+    input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0c1326; color: var(--text); font-size: 13px; outline: none; }
+    input:focus { border-color: var(--accent); }
+    .dir-row { display: flex; gap: 8px; }
+    .dir-row input { flex: 1; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    button { border: none; border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 500; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary { background: #1e2a4a; color: var(--text); border: 1px solid var(--border); }
+    .btn-warn { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4); }
+    .btn-danger { background: rgba(239,68,68,0.16); color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
+    .alert { border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #fca5a5; }
+    .alert.hidden { display: none; }
+    .meta-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 3px 0; }
+    .meta-row strong { color: var(--text); font-weight: 500; }
+    .logs { background: #080d1a; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.55; color: #cbd5e1; height: 170px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="brand">
+        <span id="status-dot" class="dot"></span>
+        <span>Super-Agent 本地伴侣</span>
+      </div>
+      <span id="status-badge" class="badge">连接后台中...</span>
+    </div>
+
+    <div id="alert-box" class="alert hidden"></div>
+
+    <div class="card">
+      <div class="meta-row">
+        <span>当前设备</span>
+        <strong id="meta-device">-</strong>
+      </div>
+      <div class="meta-row">
+        <span>单活设备锁</span>
+        <strong id="meta-lock">未持有</strong>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div class="field full">
+          <label for="server">云端网关地址</label>
+          <input id="server" type="text" placeholder="https://desktop.example.com 或 http://localhost:8080" />
+        </div>
+        <div class="field">
+          <label for="username">账号</label>
+          <input id="username" type="text" placeholder="admin" />
+        </div>
+        <div class="field">
+          <label for="access-code">登录密码（留空保持已保存）</label>
+          <input id="access-code" type="password" placeholder="••••••" />
+        </div>
+        <div class="field full">
+          <label for="dir">本地同步仓库目录（AI 命令也将锁定在此目录执行）</label>
+          <div class="dir-row">
+            <input id="dir" type="text" placeholder="请选择本地项目文件夹" />
+            <button id="btn-pick" type="button" class="btn-secondary">选择文件夹…</button>
+          </div>
+        </div>
+        <div class="field full">
+          <label for="device-name">设备名称</label>
+          <input id="device-name" type="text" placeholder="例如 My-MacBook" />
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-save-start" class="btn-primary">保存并启动同步</button>
+        <button id="btn-stop" class="btn-danger">停止同步</button>
+        <button id="btn-takeover" class="btn-warn" style="display:none;">强制接管设备锁</button>
+        <button id="btn-open-web" class="btn-secondary">打开云桌面</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="font-size:12px;color:var(--muted);">实时同步与本机执行日志</span>
+        <span style="font-size:11px;color:var(--muted);">关闭窗口将最小化至状态栏托盘</span>
+      </div>
+      <div id="logs" class="logs">等待连接本地 sync-agent 引擎...</div>
+    </div>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>

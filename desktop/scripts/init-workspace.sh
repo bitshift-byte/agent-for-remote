@@ -32,7 +32,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/Claude-Desktop.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Claude Desktop
+Name=Claude
 Comment=Claude Desktop App (Chat + Graphical Claude Code)
 Exec=/usr/local/bin/super-agent-claude-desktop
 Icon=sa-claude
@@ -44,7 +44,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/Browser.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Chrome Browser
+Name=Chrome
 Comment=Open browser in overseas cloud network
 Exec=/usr/local/bin/super-agent-browser
 Icon=web-browser
@@ -56,7 +56,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/Claude-Code-CLI.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Claude Code (CLI)
+Name=Claude Code
 Comment=Launch Claude Code CLI in /workspace (Local Exec Bridge enabled)
 Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh claude; exec bash'"
 Icon=utilities-terminal
@@ -68,7 +68,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/OpenAI-Codex-CLI.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=OpenAI Codex (CLI)
+Name=Codex
 Comment=Launch OpenAI Codex CLI in /workspace (Local Exec Bridge enabled)
 Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh codex; exec bash'"
 Icon=utilities-terminal
@@ -80,7 +80,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/Workspace-Terminal.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Workspace Terminal
+Name=终端
 Comment=Open terminal in /workspace
 Exec=xfce4-terminal --maximize --working-directory=/workspace
 Icon=utilities-terminal
@@ -92,7 +92,7 @@ cat <<'EOF' > "${DESKTOP_DIR}/Display-Settings.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=显示与字号设置
+Name=显示设置
 Comment=Adjust DPI scaling, font sizes, and dark/light theme
 Exec=/usr/local/bin/sa-display
 Icon=sa-display
@@ -102,6 +102,12 @@ EOF
 
 # Remove legacy shortcuts if present from older builds
 rm -f "${DESKTOP_DIR}/Cursor.desktop" "${DESKTOP_DIR}/VS-Code.desktop"
+
+# Mark .desktop launchers as trusted (avoids XFCE "untrusted application launcher" prompt)
+chmod +x "${DESKTOP_DIR}"/*.desktop 2>/dev/null || true
+
+# Clear stale Chrome singleton locks from unclean container shutdowns
+rm -f "${USER_HOME}/.config/google-chrome"/Singleton* 2>/dev/null || true
 
 # Apply modern v3 XFCE theme, 1:1 viewport-safe DPI default (96), smart window placement, top bar + dock, and GTK3 polish
 if [ ! -f "${USER_HOME}/.sa-theme-v3" ]; then

@@ -88,19 +88,27 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
     && npm cache clean --force
 
 # 5. Browser wrapper for non-privileged Docker sandbox (avoids --privileged, starts maximized to fit viewport)
+# - Clears stale singleton locks left by unclean container shutdowns (fixes "profile locked by another computer")
+# - --no-first-run/--no-default-browser-check skip ToS / welcome / set-default popups
+# - --password-store=basic avoids the gnome-keyring "set keyring password" prompt
+# - Chrome managed policies disable Google signin prompt, metrics consent and default-browser prompts
 RUN printf '#!/bin/sh\n\
+rm -f "${HOME:-/config}/.config/google-chrome"/Singleton* 2>/dev/null || true\n\
+CHROME_FLAGS="--no-sandbox --disable-dev-shm-usage --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync"\n\
 if command -v google-chrome-stable >/dev/null 2>&1; then\n\
-  exec google-chrome-stable --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
+  exec google-chrome-stable $CHROME_FLAGS "$@"\n\
 elif command -v chromium >/dev/null 2>&1; then\n\
-  exec chromium --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
+  exec chromium $CHROME_FLAGS "$@"\n\
 elif command -v chromium-browser >/dev/null 2>&1; then\n\
-  exec chromium-browser --no-sandbox --disable-dev-shm-usage --start-maximized "$@"\n\
+  exec chromium-browser $CHROME_FLAGS "$@"\n\
 elif command -v firefox >/dev/null 2>&1; then\n\
   exec firefox "$@"\n\
 else\n\
   exec xdg-open "$@"\n\
 fi\n' > /usr/local/bin/super-agent-browser \
-    && chmod +x /usr/local/bin/super-agent-browser
+    && chmod +x /usr/local/bin/super-agent-browser \
+    && mkdir -p /etc/opt/chrome/policies/managed \
+    && printf '{\n  "BrowserSignin": 0,\n  "MetricsEnabled": false,\n  "DefaultBrowserSettingEnabled": false,\n  "PasswordManagerEnabled": false,\n  "SafeBrowsingProtectionLevel": 1\n}\n' > /etc/opt/chrome/policies/managed/super-agent.json
 
 # 6. Modern Dark Theme (Arc-Dark + Papirus-Dark + JetBrains Mono + Color Emoji), Display Switcher, Keyring & optional official .deb pre-bake
 ARG CLAUDE_DESKTOP_DEB_URL=""

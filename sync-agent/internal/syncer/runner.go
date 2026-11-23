@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,18 +27,21 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 		opts.Interval = 800 * time.Millisecond
 	}
 
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
 	identity, err := LoadOrCreateDeviceIdentity(opts.LocalDir, opts.DeviceName)
 	if err != nil {
 		return fmt.Errorf("load device identity: %w", err)
 	}
 
 	client := NewClient(opts.ServerURL)
-	if _, err := client.Login(ctx, opts.Username, opts.Secret); err != nil {
+	if _, err := client.Login(runCtx, opts.Username, opts.Secret); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 	log.Printf("[auth] logged in as %s on %s", opts.Username, opts.ServerURL)
 
-	acq, err := acquireLockInteractive(ctx, client, identity, opts.Force)
+	acq, err := acquireLockInteractive(runCtx, client, identity, opts.Force)
 	if err != nil {
 		return fmt.Errorf("acquire active device lock: %w", err)
 	}
@@ -55,7 +59,7 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 
 	if acq.TakenOver {
 		log.Printf("[lock] took over workspace from %q — pulling latest cloud files first...", acq.PreviousDev)
-		stats, err := engine.InitialTakeoverPull(ctx)
+		stats, err := engine.InitialTakeoverPull(runCtx)
 		if err != nil {
 			return fmt.Errorf("initial takeover pull: %w", err)
 		}
@@ -66,15 +70,26 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 
 	log.Printf("[sync] watching %s <-> %s/workspace (interval=%s, ignoring node_modules/.venv/target/.git)", opts.LocalDir, opts.ServerURL, opts.Interval)
 
-	if err := runSyncPass(ctx, engine); err != nil {
-		if errors.Is(err, ErrLockLost) {
+	var syncMu sync.Mutex
+
+	syncMu.Lock()
+	initialErr := runSyncPass(runCtx, engine)
+	syncMu.Unlock()
+	if initialErr != nil {
+		if errors.Is(initialErr, ErrLockLost) {
 			log.Println("[lock] another device took over the workspace lock — sync paused automatically.")
 			return nil
 		}
-		log.Printf("[sync] initial pass error: %v", err)
+		log.Printf("[sync] initial pass error: %v", initialErr)
 	} else {
 		log.Println("[sync] initial sync check complete — watching for changes...")
 	}
+
+	// Start reverse local command execution worker (with Pre/Post Sync Barriers)
+	go RunExecLoop(runCtx, client, engine, &syncMu, func() {
+		log.Println("[lock] another device took over the workspace lock — pausing local exec & sync.")
+		cancelRun()
+	})
 
 	syncTicker := time.NewTicker(opts.Interval)
 	hbTicker := time.NewTicker(15 * time.Second)
@@ -83,11 +98,11 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-runCtx.Done():
 			log.Println("[sync] shutting down...")
 			return nil
 		case <-hbTicker.C:
-			if err := client.Heartbeat(ctx); err != nil {
+			if err := client.Heartbeat(runCtx); err != nil {
 				if errors.Is(err, ErrLockLost) {
 					log.Println("[lock] another device took over the workspace lock — sync paused automatically.")
 					return nil
@@ -97,12 +112,15 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 				log.Printf("[lock] heartbeat ok (device=%s)", identity.DeviceName)
 			}
 		case <-syncTicker.C:
-			if err := runSyncPass(ctx, engine); err != nil {
-				if errors.Is(err, ErrLockLost) {
+			syncMu.Lock()
+			passErr := runSyncPass(runCtx, engine)
+			syncMu.Unlock()
+			if passErr != nil {
+				if errors.Is(passErr, ErrLockLost) {
 					log.Println("[lock] another device took over the workspace lock — sync paused automatically.")
 					return nil
 				}
-				log.Printf("[sync] pass error: %v", err)
+				log.Printf("[sync] pass error: %v", passErr)
 			}
 		}
 	}

@@ -29,8 +29,9 @@ type DesktopStatus struct {
 }
 
 type Manager struct {
-	client *Client
-	cfg    *config.Config
+	client    *Client
+	cfg       *config.Config
+	signToken func(username string) (string, error)
 
 	mu         sync.Mutex
 	userLocks  map[string]*sync.Mutex
@@ -38,10 +39,11 @@ type Manager struct {
 	mockStates map[string]string
 }
 
-func NewManager(client *Client, cfg *config.Config) *Manager {
+func NewManager(client *Client, cfg *config.Config, signToken func(username string) (string, error)) *Manager {
 	return &Manager{
 		client:     client,
 		cfg:        cfg,
+		signToken:  signToken,
 		userLocks:  make(map[string]*sync.Mutex),
 		lastActive: make(map[string]time.Time),
 		mockStates: make(map[string]string),
@@ -232,6 +234,12 @@ func (m *Manager) createDesktopContainer(ctx context.Context, username, name str
 		"TZ=" + m.cfg.DesktopTZ,
 		"SUBFOLDER=" + DesktopSubfolder,
 		"TITLE=Super-Agent (" + username + ")",
+		"SA_GATEWAY_URL=http://super-agent-gateway:" + m.cfg.Port,
+	}
+	if m.signToken != nil {
+		if tok, err := m.signToken(username); err == nil && tok != "" {
+			env = append(env, "SA_INTERNAL_TOKEN="+tok)
+		}
 	}
 	if m.cfg.AnthropicAPIKey != "" {
 		env = append(env, "ANTHROPIC_API_KEY="+m.cfg.AnthropicAPIKey)

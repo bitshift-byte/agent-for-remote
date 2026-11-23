@@ -95,10 +95,11 @@ else\n\
 fi\n' > /usr/local/bin/super-agent-browser \
     && chmod +x /usr/local/bin/super-agent-browser
 
-# 6. Prepare shared /workspace mount point and s6 init script
+# 6. Prepare shared /workspace mount point, transparent local shell wrapper, and s6 init script
 RUN mkdir -p /workspace /custom-cont-init.d
+COPY scripts/sa-local-sh /usr/local/bin/sa-local-sh
 COPY scripts/init-workspace.sh /custom-cont-init.d/99-super-agent-init.sh
-RUN chmod +x /custom-cont-init.d/99-super-agent-init.sh
+RUN chmod +x /usr/local/bin/sa-local-sh /custom-cont-init.d/99-super-agent-init.sh
 
 ENV BROWSER=/usr/local/bin/super-agent-browser
 

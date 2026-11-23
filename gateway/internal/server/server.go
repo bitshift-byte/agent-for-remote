@@ -12,6 +12,7 @@ import (
 	"super-agent/gateway/internal/auth"
 	"super-agent/gateway/internal/config"
 	"super-agent/gateway/internal/docker"
+	"super-agent/gateway/internal/execbridge"
 	"super-agent/gateway/internal/proxy"
 	"super-agent/gateway/internal/syncsvc"
 )
@@ -20,22 +21,24 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	cfg     *config.Config
-	authMgr *auth.Manager
-	docker  *docker.Manager
-	proxy   *proxy.VNCProxy
-	syncSvc *syncsvc.Service
-	mux     *http.ServeMux
+	cfg        *config.Config
+	authMgr    *auth.Manager
+	docker     *docker.Manager
+	proxy      *proxy.VNCProxy
+	syncSvc    *syncsvc.Service
+	execBroker *execbridge.Broker
+	mux        *http.ServeMux
 }
 
-func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service) *Server {
+func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker) *Server {
 	s := &Server{
-		cfg:     cfg,
-		authMgr: authMgr,
-		docker:  dockerMgr,
-		proxy:   vncProxy,
-		syncSvc: syncSvc,
-		mux:     http.NewServeMux(),
+		cfg:        cfg,
+		authMgr:    authMgr,
+		docker:     dockerMgr,
+		proxy:      vncProxy,
+		syncSvc:    syncSvc,
+		execBroker: execBroker,
+		mux:        http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
@@ -60,6 +63,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/desktop/start", s.requireAuth(s.handleDesktopStart))
 	s.mux.HandleFunc("/api/desktop/stop", s.requireAuth(s.handleDesktopStop))
 	s.registerSyncRoutes()
+	s.registerExecRoutes()
 
 	// KasmVNC reverse proxy (all traffic authenticated by HttpOnly JWT cookie)
 	s.mux.HandleFunc("/desktop", s.handleDesktopRedirect)

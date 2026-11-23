@@ -34,27 +34,27 @@ Terminal=false
 Categories=Network;WebBrowser;
 EOF
 
-# Desktop shortcut: Claude Code in /workspace
+# Desktop shortcut: Claude Code in /workspace (commands forwarded transparently to local Mac via sa-local-sh)
 cat <<'EOF' > "${DESKTOP_DIR}/Claude-Code.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=Claude Code
-Comment=Launch Claude Code in /workspace
-Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'claude; exec bash'"
+Comment=Launch Claude Code in /workspace (Local Exec Bridge enabled)
+Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh claude; exec bash'"
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;
 EOF
 
-# Desktop shortcut: OpenAI Codex in /workspace
+# Desktop shortcut: OpenAI Codex in /workspace (commands forwarded transparently to local Mac via sa-local-sh)
 cat <<'EOF' > "${DESKTOP_DIR}/OpenAI-Codex.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=OpenAI Codex
-Comment=Launch OpenAI Codex CLI in /workspace
-Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'codex; exec bash'"
+Comment=Launch OpenAI Codex CLI in /workspace (Local Exec Bridge enabled)
+Exec=xfce4-terminal --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh codex; exec bash'"
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;

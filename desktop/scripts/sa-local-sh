@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""
+Super-Agent Transparent Local Shell Wrapper (sa-local-sh)
+Forwards non-interactive `-c "<command>"` calls from cloud AI agents (Claude Code / Codex)
+to the user's connected local machine via the Super-Agent Gateway (with Pre/Post Sync Barriers).
+Interactive shell invocations fall through directly to /bin/bash.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def exec_local_bash():
+    os.execv("/bin/bash", ["/bin/bash"] + sys.argv[1:])
+
+
+def main():
+    # Allow explicit opt-out or interactive shell fallthrough
+    if os.environ.get("SA_LOCAL_EXEC", "1") == "0":
+        exec_local_bash()
+
+    gateway_url = os.environ.get("SA_GATEWAY_URL", "").rstrip("/")
+    token = os.environ.get("SA_INTERNAL_TOKEN", "")
+    if not gateway_url or not token:
+        exec_local_bash()
+
+    # Parse `-c <command>` (also supports `-lc <command>`)
+    args = sys.argv[1:]
+    cmd = None
+    for i, a in enumerate(args):
+        if a in ("-c", "-lc", "-cl") and i + 1 < len(args):
+            cmd = args[i + 1]
+            break
+
+    if cmd is None:
+        exec_local_bash()
+
+    payload = json.dumps({
+        "command": cmd,
+        "cwd": os.getcwd(),
+        "timeout_sec": int(os.environ.get("SA_EXEC_TIMEOUT_SEC", "120")),
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{gateway_url}/api/exec/run",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=140) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("stdout"):
+                sys.stdout.write(data["stdout"])
+                sys.stdout.flush()
+            if data.get("stderr"):
+                sys.stderr.write(data["stderr"])
+                sys.stderr.flush()
+            sys.exit(int(data.get("exit_code", 0)))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        sys.stderr.write(f"[sa-local-sh] local execution unavailable ({e.code}): {body}\n")
+        sys.exit(125)
+    except Exception as e:
+        sys.stderr.write(f"[sa-local-sh] gateway connection error: {e}\n")
+        sys.exit(125)
+
+
+if __name__ == "__main__":
+    main()

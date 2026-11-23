@@ -12,6 +12,7 @@ import (
 	"super-agent/gateway/internal/auth"
 	"super-agent/gateway/internal/config"
 	"super-agent/gateway/internal/docker"
+	"super-agent/gateway/internal/execbridge"
 	"super-agent/gateway/internal/proxy"
 	"super-agent/gateway/internal/server"
 	"super-agent/gateway/internal/syncsvc"
@@ -37,11 +38,14 @@ func main() {
 	cancel()
 
 	authMgr := auth.NewManager(cfg.JWTSecret, cfg.JWTTTL)
-	dockerMgr := docker.NewManager(dockerClient, cfg)
+	// Internal desktop-to-gateway token manager with 7-day validity for long-lived container sessions
+	internalAuthMgr := auth.NewManager(cfg.JWTSecret, 7*24*time.Hour)
+	dockerMgr := docker.NewManager(dockerClient, cfg, internalAuthMgr.Sign)
 	vncProxy := proxy.NewVNCProxy(dockerMgr)
 	lockMgr := syncsvc.NewLockManager(cfg.SyncLockTTL)
 	syncSvc := syncsvc.NewService(cfg.WorkspaceDataDir, lockMgr)
-	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc)
+	execBroker := execbridge.NewBroker()
+	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

@@ -274,8 +274,8 @@ func (m *Manager) createUserVM(ctx context.Context, username, name string) error
 	safeUser := SanitizeUsername(username)
 	cpus := int(math.Max(1, math.Round(m.cfg.DesktopCPUs)))
 	memMB := m.cfg.DesktopMemoryMB
-	if memMB < 1536 {
-		memMB = 2048
+	if memMB < 1024 {
+		memMB = 1400
 	}
 
 	internalTok := ""

@@ -4,7 +4,7 @@ export TZ="${TZ:-$(cat /etc/timezone 2>/dev/null || echo America/Los_Angeles)}"
 export LANG=en_US.UTF-8
 export LANGUAGE=en_US:en
 export LC_ALL=en_US.UTF-8
-CHROME_FLAGS="--no-sandbox --test-type --disable-dev-shm-usage --disable-gpu --lang=en-US --accept-lang=en-US,en;q=0.9 --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync --disable-features=OptimizationHintsOnDeviceModel,OptimizationGuideModelDownloading,ChromeWhatsNewUI --disable-background-networking --disable-component-update --disable-domain-reliability --no-crash-upload"
+CHROME_FLAGS="--no-sandbox --test-type --disable-dev-shm-usage --disable-gpu --lang=en-US --accept-lang=en-US,en;q=0.9 --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync --disable-extensions --disable-default-apps --disable-background-networking --disable-component-update --disable-domain-reliability --no-crash-upload --disable-features=OptimizationHintsOnDeviceModel,OptimizationGuideModelDownloading,ChromeWhatsNewUI,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider --renderer-process-limit=3 --disk-cache-size=67108864 --js-flags=--max-old-space-size=512"
 if command -v google-chrome-stable >/dev/null 2>&1; then
   exec google-chrome-stable $CHROME_FLAGS "$@"
 elif command -v chromium >/dev/null 2>&1; then

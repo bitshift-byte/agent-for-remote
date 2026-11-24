@@ -40,7 +40,27 @@ if ! incus storage list --format csv | grep -q '^default,'; then
   sudo incus admin init --auto
 fi
 
-echo "[3/3] Checking Incus bridge gateway IP..."
+echo "[3/4] Applying host-level KVM memory optimizations (KSM + zram for low-RAM hosts)..."
+# Enable Kernel Samepage Merging (KSM) to deduplicate memory pages across VMs
+if [ -w /sys/kernel/mm/ksm/run ]; then
+  echo 1 | sudo tee /sys/kernel/mm/ksm/run >/dev/null
+  echo 200 | sudo tee /sys/kernel/mm/ksm/sleep_millisecs >/dev/null || true
+fi
+
+# On <= 4GB RAM hosts without swap, configure zstd zram so QEMU never gets OOM-killed
+HOST_MEM_KB="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+if [ "${HOST_MEM_KB}" -gt 0 ] && [ "${HOST_MEM_KB}" -le 4500000 ] && ! swapon --show=NAME 2>/dev/null | grep -q '/dev/zram'; then
+  sudo modprobe zram 2>/dev/null || true
+  if command -v zramctl >/dev/null 2>&1; then
+    ZDEV="$(sudo zramctl --find --size "$((HOST_MEM_KB * 1024 / 2))" --algorithm zstd 2>/dev/null || sudo zramctl --find --size "$((HOST_MEM_KB * 1024 / 2))" 2>/dev/null || true)"
+    if [ -n "${ZDEV}" ]; then
+      sudo mkswap "${ZDEV}" >/dev/null 2>&1 && sudo swapon -p 100 "${ZDEV}" 2>/dev/null || true
+      echo "  Enabled host zram swap on ${ZDEV}"
+    fi
+  fi
+fi
+
+echo "[4/4] Checking Incus bridge gateway IP..."
 BRIDGE_IP="$(incus network get incusbr0 ipv4.address | cut -d/ -f1)"
 echo "Done! Incus KVM host is ready."
 echo "  Socket:         /var/lib/incus/unix.socket"

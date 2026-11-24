@@ -15,11 +15,14 @@ FCITX_DIR="${USER_HOME}/.config/fcitx5"
 
 mkdir -p /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" "${FCITX_DIR}" /etc/opt/chrome/policies/managed
 
-# Chrome managed policies (US locale + skip Google signin, metrics, default browser, password manager prompts)
+# Chrome managed policies (US locale + Memory Saver + disable background/HW accel + skip first-run prompts)
 cat <<'EOF' > /etc/opt/chrome/policies/managed/super-agent.json
 {
   "ApplicationLocaleValue": "en-US",
   "SpellcheckLanguage": ["en-US"],
+  "HighEfficiencyModeEnabled": true,
+  "BackgroundModeEnabled": false,
+  "HardwareAccelerationModeEnabled": false,
   "BrowserSignin": 0,
   "MetricsEnabled": false,
   "DefaultBrowserSettingEnabled": false,
@@ -164,6 +167,62 @@ ColorCursor=#4f7cff
 MiscMenubarDefault=FALSE
 MiscBordersDefault=TRUE
 ScrollingLines=10000
+EOF
+
+# Low-CPU XFCE window manager: disable compositor/shadows, wireframe drag (0% VNC redraw CPU)
+cat <<'EOF' > "${XFCONF_DIR}/xfwm4.xml"
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="Arc-Dark"/>
+    <property name="use_compositing" type="bool" value="false"/>
+    <property name="show_frame_shadow" type="bool" value="false"/>
+    <property name="show_popup_shadow" type="bool" value="false"/>
+    <property name="box_move" type="bool" value="true"/>
+    <property name="box_resize" type="bool" value="true"/>
+    <property name="button_layout" type="string" value="CHM|O"/>
+  </property>
+</channel>
+EOF
+
+# Low-bandwidth solid dark desktop backdrop (compresses to ~1KB over VNC)
+cat <<'EOF' > "${XFCONF_DIR}/xfce4-desktop.xml"
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitorVNC-0" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="color-style" type="int" value="0"/>
+          <property name="image-style" type="int" value="0"/>
+          <property name="rgba1" type="array">
+            <value type="double" value="0.043137"/>
+            <value type="double" value="0.058824"/>
+            <value type="double" value="0.101961"/>
+            <value type="double" value="1.000000"/>
+          </property>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>
+EOF
+
+# Disable GTK animations to keep 1-vCPU UI snappy
+cat <<'EOF' > "${GTK3_DIR}/settings.ini"
+[Settings]
+gtk-enable-animations=0
+gtk-enable-event-sounds=0
+gtk-enable-input-feedback-sounds=0
+EOF
+
+# TigerVNC low-CPU tuning (24fps cap, fast zlib level 1, pixel diff idle detection)
+mkdir -p "${USER_HOME}/.vnc"
+cat <<'EOF' > "${USER_HOME}/.vnc/config"
+FrameRate=24
+ZlibLevel=1
+CompareFB=2
+AlwaysShared
 EOF
 
 cat <<'EOF' > "${GTK3_DIR}/gtk.css"

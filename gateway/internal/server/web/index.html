@@ -814,6 +814,14 @@
     function openDesktop(url) {
       const ov = $("desktop-connecting");
       const frame = $("desktop-iframe");
+      // Default the Selkies stats strip (fps/bandwidth overlay) to ON for first-time visitors.
+      // The /desktop/ iframe shares this origin's localStorage; key mirrors the dashboard's own scheme:
+      //   sanitize(origin + pathname) + "_stats_strip", read as === "true".
+      // Only set when absent so users can still turn the strip off themselves.
+      try {
+        const stripKey = (location.origin + "/desktop/").replace(/[^a-zA-Z0-9._-]/g, "_") + "_stats_strip";
+        if (localStorage.getItem(stripKey) === null) localStorage.setItem(stripKey, "true");
+      } catch {}
       ov.style.display = "flex";
       frame.onload = () => { ov.style.display = "none"; };
       // Failsafe: never keep the splash longer than 20s

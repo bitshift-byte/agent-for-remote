@@ -113,7 +113,7 @@ func Load() (*Config, error) {
 		DesktopMemoryMB:              int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
 		DesktopCPUs:                  getEnvFloat("DESKTOP_CPUS", 4.0),
 		DesktopShmMB:                 int64(getEnvInt("DESKTOP_SHM_MB", 2048)),
-		DesktopTZ:                    getEnv("DESKTOP_TZ", "Asia/Shanghai"),
+		DesktopTZ:                    getEnv("DESKTOP_TZ", "America/Los_Angeles"),
 		DesktopDPI:                   strings.TrimSpace(os.Getenv("DESKTOP_DPI")),
 		DesktopFontSize:              strings.TrimSpace(os.Getenv("DESKTOP_FONT_SIZE")),
 		DesktopTheme:                 strings.TrimSpace(os.Getenv("DESKTOP_THEME")),

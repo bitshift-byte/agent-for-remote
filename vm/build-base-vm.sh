@@ -44,9 +44,12 @@ for loader in /usr/lib/*/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders; do
   [ -x "$loader" ] && "$loader" --update-cache || true
 done
 
-# Generate UTF-8 Chinese & English locales so fcitx5 / XIM works reliably
+# Generate UTF-8 Chinese & English locales and set default US timezone (America/Los_Angeles)
 sed -i "/zh_CN.UTF-8/s/^# //g; /en_US.UTF-8/s/^# //g" /etc/locale.gen
 locale-gen zh_CN.UTF-8 en_US.UTF-8
+update-locale LANG=en_US.UTF-8
+ln -snf /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
+echo "America/Los_Angeles" > /etc/timezone
 
 # Node.js 22 + Claude Code & Codex CLI
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

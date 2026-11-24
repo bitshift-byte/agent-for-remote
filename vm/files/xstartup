@@ -6,9 +6,10 @@ export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
 mkdir -p "${XDG_RUNTIME_DIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"
 
-export LANG=zh_CN.UTF-8
-export LANGUAGE=zh_CN:zh:en_US:en
-export LC_ALL=zh_CN.UTF-8
+export TZ="$(cat /etc/timezone 2>/dev/null || echo America/Los_Angeles)"
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US:en
+export LC_ALL=en_US.UTF-8
 export GTK_IM_MODULE=fcitx
 export QT_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx

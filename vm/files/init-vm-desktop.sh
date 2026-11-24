@@ -15,9 +15,11 @@ FCITX_DIR="${USER_HOME}/.config/fcitx5"
 
 mkdir -p /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" "${FCITX_DIR}" /etc/opt/chrome/policies/managed
 
-# Chrome managed policies (skip Google signin, metrics, default browser, password manager prompts)
+# Chrome managed policies (US locale + skip Google signin, metrics, default browser, password manager prompts)
 cat <<'EOF' > /etc/opt/chrome/policies/managed/super-agent.json
 {
+  "ApplicationLocaleValue": "en-US",
+  "SpellcheckLanguage": ["en-US"],
   "BrowserSignin": 0,
   "MetricsEnabled": false,
   "DefaultBrowserSettingEnabled": false,
@@ -255,11 +257,12 @@ if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
 EOF
 fi
 
-# Pre-configure fcitx5 with English keyboard + Chinese Pinyin so Ctrl+Space switches immediately
+# Pre-configure US locale (en_US.UTF-8) + fcitx5 Chinese Pinyin so browser reports en-US while Ctrl+Space still types Chinese
 cat <<'EOF' > /etc/profile.d/fcitx5.sh
-export LANG=zh_CN.UTF-8
-export LANGUAGE=zh_CN:zh:en_US:en
-export LC_ALL=zh_CN.UTF-8
+export TZ="${TZ:-$(cat /etc/timezone 2>/dev/null || echo America/Los_Angeles)}"
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US:en
+export LC_ALL=en_US.UTF-8
 export GTK_IM_MODULE=fcitx
 export QT_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx

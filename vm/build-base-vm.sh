@@ -105,6 +105,9 @@ systemctl enable sa-vm-boot.service
 '
 
 # Push desktop streaming configs (:3000/desktop/ -> websockify -> loopback TigerVNC :1)
+incus file push "${REPO_ROOT}/vm/files/super-agent-browser" "${BUILDER_VM}/usr/local/bin/super-agent-browser" --mode 0755
+incus file push "${REPO_ROOT}/vm/files/init-vm-desktop.sh" "${BUILDER_VM}/usr/local/bin/sa-vm-init-desktop" --mode 0755
+incus file push "${REPO_ROOT}/desktop/scripts/setup-theme.sh" "${BUILDER_VM}/tmp/setup-theme.sh" --mode 0755
 incus file push "${REPO_ROOT}/vm/files/xstartup" "${BUILDER_VM}/home/ubuntu/.vnc/xstartup" --mode 0755
 incus file push "${REPO_ROOT}/vm/files/novnc-index.html" "${BUILDER_VM}/usr/share/novnc/index.html" --mode 0644
 incus file push "${REPO_ROOT}/vm/files/super-agent-vnc.service" "${BUILDER_VM}/etc/systemd/system/super-agent-vnc.service" --mode 0644
@@ -112,6 +115,15 @@ incus file push "${REPO_ROOT}/vm/files/super-agent-desktop.service" "${BUILDER_V
 
 incus exec "${BUILDER_VM}" -- env VNC_PASSWORD="${INCUS_VNC_PASSWORD:-}" bash -lc '
 set -euo pipefail
+# Generate wallpaper + SVG app icons (ChatGPT, Claude, Display) and populate Desktop shortcuts
+/tmp/setup-theme.sh
+rm -f /tmp/setup-theme.sh
+/usr/local/bin/sa-vm-init-desktop
+
+# Verify Claude Code & Codex CLIs are installed on PATH
+command -v claude >/dev/null
+command -v codex >/dev/null
+
 if [ -z "${VNC_PASSWORD}" ]; then
   VNC_PASSWORD="$(openssl rand -hex 4)"
 fi

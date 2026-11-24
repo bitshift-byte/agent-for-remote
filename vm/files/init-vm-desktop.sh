@@ -62,7 +62,7 @@ Type=Application
 Name=Chrome
 Comment=Open browser in KVM VM network
 Exec=/usr/local/bin/super-agent-browser
-Icon=web-browser
+Icon=google-chrome
 Terminal=false
 Categories=Network;WebBrowser;
 EOF
@@ -74,7 +74,7 @@ Type=Application
 Name=Claude Code
 Comment=Launch Claude Code CLI in /workspace (Local Exec Bridge enabled)
 Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh claude; exec bash'"
-Icon=utilities-terminal
+Icon=sa-claude-code
 Terminal=false
 Categories=Development;
 EOF
@@ -84,9 +84,9 @@ cat <<'EOF' > "${DESKTOP_DIR}/OpenAI-Codex-CLI.desktop"
 Version=1.0
 Type=Application
 Name=Codex
-Comment=Launch OpenAI Codex CLI in /workspace (Local Exec Bridge enabled)
-Exec=xfce4-terminal --maximize --working-directory=/workspace -e "bash -lc 'SHELL=/usr/local/bin/sa-local-sh codex; exec bash'"
-Icon=utilities-terminal
+Comment=OpenAI Codex Desktop App (ChatGPT Linux App with Codex)
+Exec=/usr/local/bin/super-agent-chatgpt
+Icon=sa-codex
 Terminal=false
 Categories=Development;
 EOF
@@ -98,7 +98,7 @@ Type=Application
 Name=终端
 Comment=Open terminal in /workspace
 Exec=xfce4-terminal --maximize --working-directory=/workspace
-Icon=utilities-terminal
+Icon=sa-terminal
 Terminal=false
 Categories=System;TerminalEmulator;
 EOF
@@ -110,7 +110,7 @@ Type=Application
 Name=工作区
 Comment=Open /workspace synced repositories
 Exec=exo-open --launch FileManager /workspace
-Icon=folder-remote
+Icon=sa-workspace
 Terminal=false
 Categories=System;FileManager;
 EOF

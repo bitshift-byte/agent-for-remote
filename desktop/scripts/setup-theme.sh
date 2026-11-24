@@ -106,4 +106,59 @@ cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-display.svg
 </svg>
 EOF
 
+# 5. Dedicated SVG icon for Codex Desktop shortcut
+cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-codex.svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#27272a"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#g4)" stroke="#3f3f46" stroke-width="3"/>
+  <path d="M46 44 L28 64 L46 84" fill="none" stroke="#22c55e" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M82 44 L100 64 L82 84" fill="none" stroke="#22c55e" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="70" y1="38" x2="58" y2="90" stroke="#fafafa" stroke-width="7" stroke-linecap="round"/>
+</svg>
+EOF
+
+# 6. Dedicated SVG icon for Claude Code CLI shortcut
+cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-claude-code.svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g5" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2b1912"/>
+      <stop offset="100%" stop-color="#432216"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#g5)" stroke="#e07a4b" stroke-width="3"/>
+  <path d="M34 46 L54 64 L34 82" fill="none" stroke="#f59e0b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="62" y1="82" x2="94" y2="82" stroke="#fff7ed" stroke-width="8" stroke-linecap="round"/>
+</svg>
+EOF
+
+# 7. Dedicated SVG icon for Workspace Terminal shortcut
+cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-terminal.svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#0f172a" stroke="#334155" stroke-width="3"/>
+  <path d="M34 46 L54 64 L34 82" fill="none" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="62" y1="82" x2="92" y2="82" stroke="#e2e8f0" stroke-width="8" stroke-linecap="round"/>
+</svg>
+EOF
+
+# 8. Dedicated SVG icon for Workspace Folder shortcut
+cat <<'EOF' > /usr/share/icons/hicolor/scalable/apps/sa-workspace.svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g6" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#g6)"/>
+  <path d="M26 44 C26 39 30 36 35 36 L54 36 L62 44 L93 44 C98 44 102 48 102 53 L102 86 C102 91 98 95 93 95 L35 95 C30 95 26 91 26 86 Z" fill="#eff6ff"/>
+</svg>
+EOF
+
 gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+gtk-update-icon-cache -f /usr/share/icons/Papirus-Dark 2>/dev/null || true

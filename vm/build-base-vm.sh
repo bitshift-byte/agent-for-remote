@@ -31,10 +31,17 @@ apt-get update
 apt-get install -y --no-install-recommends \
   xfce4 xfce4-terminal xfce4-whiskermenu-plugin dbus-x11 \
   tigervnc-standalone-server tigervnc-common tigervnc-tools novnc websockify \
-  arc-theme papirus-icon-theme fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
+  arc-theme papirus-icon-theme hicolor-icon-theme adwaita-icon-theme \
+  librsvg2-common libgdk-pixbuf2.0-bin libgtk-3-bin \
+  fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
   locales fcitx5 fcitx5-pinyin fcitx5-chinese-addons fcitx5-frontend-gtk2 fcitx5-frontend-gtk3 fcitx5-frontend-qt5 fcitx5-config-qt im-config \
   gnome-keyring libsecret-1-0 libglib2.0-bin wmctrl x11-utils zenity \
   curl wget git jq ripgrep tmux vim python3 python3-pip build-essential ca-certificates gnupg
+
+# Refresh GDK-Pixbuf SVG loader cache so XFCE renders all .svg desktop & theme icons
+for loader in /usr/lib/*/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders; do
+  [ -x "$loader" ] && "$loader" --update-cache || true
+done
 
 # Generate UTF-8 Chinese & English locales so fcitx5 / XIM works reliably
 sed -i "/zh_CN.UTF-8/s/^# //g; /en_US.UTF-8/s/^# //g" /etc/locale.gen
@@ -46,10 +53,30 @@ apt-get install -y nodejs
 npm install -g pnpm @anthropic-ai/claude-code @openai/codex
 
 # Google Chrome (amd64)
-if [ "$(dpkg --print-architecture)" = "amd64" ]; then
+ARCH="$(dpkg --print-architecture)"
+if [ "$ARCH" = "amd64" ]; then
   wget -qO /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
   apt-get install -y /tmp/chrome.deb
   rm -f /tmp/chrome.deb
+fi
+
+# Official OpenAI ChatGPT + Codex Desktop App for Linux (.deb, Ubuntu 24.04 LTS)
+CHATGPT_DEB_URL="${CHATGPT_DESKTOP_DEB_URL:-}"
+if [ -z "$CHATGPT_DEB_URL" ]; then
+  if [ "$ARCH" = "amd64" ]; then
+    CHATGPT_DEB_URL="https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb"
+  elif [ "$ARCH" = "arm64" ]; then
+    CHATGPT_DEB_URL="https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_arm64.deb"
+  fi
+fi
+if [ -n "$CHATGPT_DEB_URL" ]; then
+  echo "Installing official ChatGPT + Codex desktop app from ${CHATGPT_DEB_URL}..."
+  if wget -qO /tmp/chatgpt-desktop.deb "${CHATGPT_DEB_URL}"; then
+    apt-get install -y /tmp/chatgpt-desktop.deb || apt-get -f install -y || true
+    rm -f /tmp/chatgpt-desktop.deb
+  else
+    echo "Warning: failed to download ChatGPT/Codex desktop .deb; will fall back to web app mode."
+  fi
 fi
 
 # Create desktop user ubuntu if absent

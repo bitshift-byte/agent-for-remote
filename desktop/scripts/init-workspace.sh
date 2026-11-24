@@ -523,30 +523,28 @@ if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
 EOF
 fi
 
-# Seed Codex CLI config into persistent /config/.codex/config.toml on boot so existing /config volumes
-# also receive it. Prefers OPENAI_BASE_URL if set; otherwise auto-detects the Docker bridge gateway IP.
+# Codex CLI configuration:
+# - By default (no OPENAI_BASE_URL in .env), Codex uses official ChatGPT account login (`codex` -> Sign in with ChatGPT).
+# - Automatically cleans up legacy auto-generated "GLM via tunnel CPA" third-party config so existing /config volumes switch to account login cleanly.
+# - Only writes a custom provider config.toml if OPENAI_BASE_URL is explicitly configured in .env.
 CODEX_DIR="${USER_HOME}/.codex"
 mkdir -p "${CODEX_DIR}"
-if [ ! -f "${CODEX_DIR}/config.toml" ] || [ "${CODEX_OVERWRITE_CONFIG:-0}" = "1" ]; then
-  CODEX_MODEL_VAL="${CODEX_MODEL:-GLM}"
-  CODEX_BASE_URL_VAL="${OPENAI_BASE_URL:-}"
-  if [ -z "${CODEX_BASE_URL_VAL}" ]; then
-    GW_IP="$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}' || true)"
-    if [ -z "${GW_IP}" ]; then
-      GW_IP="172.18.0.1"
-    fi
-    CODEX_BASE_URL_VAL="http://${GW_IP}:18317/v1"
-  fi
-  cat <<EOF > "${CODEX_DIR}/config.toml"
+if [ -n "${OPENAI_BASE_URL:-}" ]; then
+  if [ ! -f "${CODEX_DIR}/config.toml" ] || [ "${CODEX_OVERWRITE_CONFIG:-0}" = "1" ]; then
+    CODEX_MODEL_VAL="${CODEX_MODEL:-gpt-5}"
+    cat <<EOF > "${CODEX_DIR}/config.toml"
 model = "${CODEX_MODEL_VAL}"
-model_provider = "glm"
+model_provider = "custom"
 
-[model_providers.glm]
-name = "GLM via tunnel CPA"
-base_url = "${CODEX_BASE_URL_VAL}"
+[model_providers.custom]
+name = "Custom OpenAI-compatible Endpoint"
+base_url = "${OPENAI_BASE_URL}"
 wire_api = "responses"
 env_key = "OPENAI_API_KEY"
 EOF
+  fi
+elif [ -f "${CODEX_DIR}/config.toml" ] && grep -q 'GLM via tunnel CPA' "${CODEX_DIR}/config.toml" 2>/dev/null; then
+  rm -f "${CODEX_DIR}/config.toml"
 fi
 
 chmod +x "${DESKTOP_DIR}"/*.desktop

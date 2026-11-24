@@ -116,6 +116,7 @@ fi\n' > /usr/local/bin/super-agent-browser \
 # 6. Modern Dark Theme (Arc-Dark + Papirus-Dark + JetBrains Mono + Color Emoji), Display Switcher, Keyring & optional official .deb pre-bake
 ARG CLAUDE_DESKTOP_DEB_URL=""
 ARG CHATGPT_DESKTOP_DEB_URL=""
+ARG CODEX_DESKTOP_DEB_URL=""
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        gnome-keyring \
@@ -138,6 +139,11 @@ RUN apt-get update \
          wget -qO /tmp/chatgpt-desktop.deb "${CHATGPT_DESKTOP_DEB_URL}" \
          && (apt-get install -y --no-install-recommends /tmp/chatgpt-desktop.deb || true) \
          && rm -f /tmp/chatgpt-desktop.deb; \
+       fi \
+    && if [ -n "${CODEX_DESKTOP_DEB_URL}" ]; then \
+         wget -qO /tmp/codex-desktop.deb "${CODEX_DESKTOP_DEB_URL}" \
+         && (apt-get install -y --no-install-recommends /tmp/codex-desktop.deb || true) \
+         && rm -f /tmp/codex-desktop.deb; \
        fi \
     && rm -rf /var/lib/apt/lists/*
 
@@ -173,8 +179,5 @@ ENV BROWSER=/usr/local/bin/super-agent-browser
 
 EXPOSE 3000 3001
 
-# 9. AI model defaults (can be overridden at runtime via .env: ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL / CODEX_MODEL / OPENAI_BASE_URL)
-# Note: /config/.codex/config.toml is seeded at container boot by init-workspace.sh so existing persistent /config volumes receive it too.
-ENV ANTHROPIC_MODEL=GLM \
-    ANTHROPIC_SMALL_FAST_MODEL=GLM \
-    CODEX_MODEL=GLM
+# 9. AI model defaults: Codex defaults to official ChatGPT account login (no third-party provider baked in).
+# Set OPENAI_BASE_URL / CODEX_MODEL or ANTHROPIC_MODEL in .env only if you want a custom provider.

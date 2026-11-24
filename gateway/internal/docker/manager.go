@@ -13,21 +13,14 @@ import (
 	"time"
 
 	"super-agent/gateway/internal/config"
+	"super-agent/gateway/internal/runtime"
 )
 
-const DesktopSubfolder = "/desktop/"
+const DesktopSubfolder = runtime.DesktopSubfolder
 
 var validNameRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
-type DesktopStatus struct {
-	Username      string  `json:"username"`
-	ContainerName string  `json:"container_name"`
-	State         string  `json:"state"` // "running", "paused", "stopped", "not_created"
-	Ready         bool    `json:"ready"`
-	DesktopURL    string  `json:"desktop_url"`
-	MemoryMB      int64   `json:"memory_mb"`
-	CPUs          float64 `json:"cpus"`
-}
+type DesktopStatus = runtime.DesktopStatus
 
 type Manager struct {
 	client    *Client
@@ -105,6 +98,7 @@ func (m *Manager) GetStatus(ctx context.Context, username string) (*DesktopStatu
 	status := &DesktopStatus{
 		Username:      username,
 		ContainerName: name,
+		Runtime:       "docker",
 		State:         "not_created",
 		Ready:         false,
 		DesktopURL:    DesktopSubfolder,

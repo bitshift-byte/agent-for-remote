@@ -11,9 +11,9 @@ import (
 
 	"super-agent/gateway/internal/auth"
 	"super-agent/gateway/internal/config"
-	"super-agent/gateway/internal/docker"
 	"super-agent/gateway/internal/execbridge"
 	"super-agent/gateway/internal/proxy"
+	"super-agent/gateway/internal/runtime"
 	"super-agent/gateway/internal/syncsvc"
 	"super-agent/gateway/internal/tunnel"
 )
@@ -24,7 +24,7 @@ var webFS embed.FS
 type Server struct {
 	cfg          *config.Config
 	authMgr      *auth.Manager
-	docker       *docker.Manager
+	docker       runtime.Provider
 	proxy        *proxy.VNCProxy
 	syncSvc      *syncsvc.Service
 	execBroker   *execbridge.Broker
@@ -33,7 +33,7 @@ type Server struct {
 	mux          *http.ServeMux
 }
 
-func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr *docker.Manager, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker, tunnelBroker *tunnel.Broker, devices *syncsvc.DeviceRegistry) *Server {
+func New(cfg *config.Config, authMgr *auth.Manager, dockerMgr runtime.Provider, vncProxy *proxy.VNCProxy, syncSvc *syncsvc.Service, execBroker *execbridge.Broker, tunnelBroker *tunnel.Broker, devices *syncsvc.DeviceRegistry) *Server {
 	s := &Server{
 		cfg:          cfg,
 		authMgr:      authMgr,
@@ -203,7 +203,7 @@ func (s *Server) handleDesktopStop(w http.ResponseWriter, r *http.Request, usern
 }
 
 func (s *Server) handleDesktopRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, docker.DesktopSubfolder, http.StatusFound)
+	http.Redirect(w, r, runtime.DesktopSubfolder, http.StatusFound)
 }
 
 func (s *Server) handleDesktopProxy(w http.ResponseWriter, r *http.Request, username string) {

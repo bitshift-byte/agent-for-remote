@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"super-agent/gateway/internal/docker"
+	"super-agent/gateway/internal/runtime"
 )
 
 type VNCProxy struct {
-	manager *docker.Manager
+	manager runtime.Provider
 }
 
-func NewVNCProxy(manager *docker.Manager) *VNCProxy {
+func NewVNCProxy(manager runtime.Provider) *VNCProxy {
 	return &VNCProxy{manager: manager}
 }
 
@@ -31,7 +32,12 @@ func (p *VNCProxy) ServeUser(w http.ResponseWriter, r *http.Request, username st
 		return
 	}
 
-	target, err := url.Parse(p.manager.UpstreamURL(username))
+	upstream := p.manager.UpstreamURL(username)
+	if upstream == "" {
+		http.Error(w, "Desktop workspace is starting or has no IP yet. Please return to the portal and wake it.", http.StatusBadGateway)
+		return
+	}
+	target, err := url.Parse(upstream)
 	if err != nil {
 		http.Error(w, "invalid upstream target", http.StatusInternalServerError)
 		return

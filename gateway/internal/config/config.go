@@ -14,10 +14,17 @@ type Config struct {
 	JWTTTL           time.Duration
 	CookieSecure     bool
 	Users            map[string]string
-	DockerHost       string
-	DockerNetwork    string
-	DesktopImage     string
-	DesktopMemoryMB  int64
+	DesktopRuntime    string // "docker" (default) or "incus" (KVM full-kernel VM)
+	DockerHost        string
+	DockerNetwork     string
+	IncusSocket       string
+	IncusVMImage      string
+	IncusStoragePool  string
+	IncusNetwork      string
+	VMGatewayURL      string // Gateway URL reachable from inside KVM VM (e.g. http://10.x.x.1:8080)
+	UserEgressProxies map[string]string
+	DesktopImage      string
+	DesktopMemoryMB   int64
 	DesktopCPUs      float64
 	DesktopShmMB     int64
 	DesktopTZ        string
@@ -93,8 +100,15 @@ func Load() (*Config, error) {
 		JWTTTL:                       time.Duration(ttlHours) * time.Hour,
 		CookieSecure:                 cookieSecure,
 		Users:                        users,
+		DesktopRuntime:               strings.ToLower(getEnv("DESKTOP_RUNTIME", "docker")),
 		DockerHost:                   dockerHost,
 		DockerNetwork:                getEnv("DOCKER_NETWORK", "super-agent-net"),
+		IncusSocket:                  getEnv("INCUS_SOCKET", "/var/lib/incus/unix.socket"),
+		IncusVMImage:                 getEnv("INCUS_VM_IMAGE", "super-agent-vm-base"),
+		IncusStoragePool:             getEnv("INCUS_STORAGE_POOL", "default"),
+		IncusNetwork:                 getEnv("INCUS_NETWORK", "incusbr0"),
+		VMGatewayURL:                 strings.TrimRight(strings.TrimSpace(os.Getenv("VM_GATEWAY_URL")), "/"),
+		UserEgressProxies:            parseKeyValueMap(os.Getenv("USER_EGRESS_PROXIES")),
 		DesktopImage:                 getEnv("DESKTOP_IMAGE", "super-agent-desktop:latest"),
 		DesktopMemoryMB:              int64(getEnvInt("DESKTOP_MEMORY_MB", 6144)),
 		DesktopCPUs:                  getEnvFloat("DESKTOP_CPUS", 4.0),
@@ -151,6 +165,25 @@ func parseUsers(raw string) (map[string]string, error) {
 		return nil, fmt.Errorf("AUTH_USERS must contain at least one user")
 	}
 	return users, nil
+}
+
+func parseKeyValueMap(raw string) map[string]string {
+	out := make(map[string]string)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		parts := strings.SplitN(item, "=", 2)
+		if len(parts) == 2 {
+			k := strings.TrimSpace(parts[0])
+			v := strings.TrimSpace(parts[1])
+			if k != "" && v != "" {
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 func getEnv(key, fallback string) string {

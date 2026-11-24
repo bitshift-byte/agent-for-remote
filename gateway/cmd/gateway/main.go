@@ -13,7 +13,9 @@ import (
 	"super-agent/gateway/internal/config"
 	"super-agent/gateway/internal/docker"
 	"super-agent/gateway/internal/execbridge"
+	"super-agent/gateway/internal/incus"
 	"super-agent/gateway/internal/proxy"
+	"super-agent/gateway/internal/runtime"
 	"super-agent/gateway/internal/server"
 	"super-agent/gateway/internal/syncsvc"
 	"super-agent/gateway/internal/tunnel"
@@ -25,34 +27,47 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	dockerClient, err := docker.NewClient(cfg.DockerHost)
-	if err != nil {
-		log.Fatalf("failed to initialize docker client: %v", err)
-	}
-
-	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := dockerClient.Ping(pingCtx); err != nil {
-		log.Printf("[warn] docker daemon not reachable at %s: %v (will retry on demand)", cfg.DockerHost, err)
-	} else {
-		log.Printf("[ok] connected to docker daemon at %s", cfg.DockerHost)
-	}
-	cancel()
-
 	authMgr := auth.NewManager(cfg.JWTSecret, cfg.JWTTTL)
-	// Internal desktop-to-gateway token manager with 7-day validity for long-lived container sessions
+	// Internal desktop-to-gateway token manager with 7-day validity for long-lived sessions
 	internalAuthMgr := auth.NewManager(cfg.JWTSecret, 7*24*time.Hour)
-	dockerMgr := docker.NewManager(dockerClient, cfg, internalAuthMgr.Sign)
-	vncProxy := proxy.NewVNCProxy(dockerMgr)
+
+	var desktopMgr runtime.Provider
+	if cfg.DesktopRuntime == "incus" {
+		incusClient := incus.NewClient(cfg.IncusSocket)
+		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := incusClient.Ping(pingCtx); err != nil {
+			log.Printf("[warn] incus daemon not reachable at %s: %v (will retry on demand)", cfg.IncusSocket, err)
+		} else {
+			log.Printf("[ok] connected to incus KVM daemon at %s (image=%s, network=%s)", cfg.IncusSocket, cfg.IncusVMImage, cfg.IncusNetwork)
+		}
+		cancel()
+		desktopMgr = incus.NewManager(incusClient, cfg, internalAuthMgr.Sign)
+	} else {
+		dockerClient, err := docker.NewClient(cfg.DockerHost)
+		if err != nil {
+			log.Fatalf("failed to initialize docker client: %v", err)
+		}
+		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := dockerClient.Ping(pingCtx); err != nil {
+			log.Printf("[warn] docker daemon not reachable at %s: %v (will retry on demand)", cfg.DockerHost, err)
+		} else {
+			log.Printf("[ok] connected to docker daemon at %s", cfg.DockerHost)
+		}
+		cancel()
+		desktopMgr = docker.NewManager(dockerClient, cfg, internalAuthMgr.Sign)
+	}
+
+	vncProxy := proxy.NewVNCProxy(desktopMgr)
 	lockMgr := syncsvc.NewLockManager(cfg.SyncLockTTL)
 	syncSvc := syncsvc.NewService(cfg.WorkspaceDataDir, lockMgr)
 	execBroker := execbridge.NewBroker()
 	tunnelBroker := tunnel.NewBroker()
 	devices := syncsvc.NewDeviceRegistry(cfg.WorkspaceDataDir)
-	srv := server.New(cfg, authMgr, dockerMgr, vncProxy, syncSvc, execBroker, tunnelBroker, devices)
+	srv := server.New(cfg, authMgr, desktopMgr, vncProxy, syncSvc, execBroker, tunnelBroker, devices)
 
 	reaperCtx, cancelReaper := context.WithCancel(context.Background())
 	defer cancelReaper()
-	go dockerMgr.StartIdleReaper(reaperCtx)
+	go desktopMgr.StartIdleReaper(reaperCtx)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

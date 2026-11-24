@@ -1,6 +1,6 @@
 #!/bin/sh
 if command -v claude-desktop >/dev/null 2>&1; then
-  exec env SHELL=/usr/local/bin/sa-local-sh claude-desktop --no-sandbox --disable-dev-shm-usage --password-store=basic --start-maximized "$@"
+  exec env SHELL=/usr/local/bin/sa-local-sh claude-desktop --no-sandbox --test-type --disable-dev-shm-usage --password-store=basic --start-maximized "$@"
 else
   exec /usr/local/bin/super-agent-browser --app=https://claude.ai --start-maximized "$@"
 fi

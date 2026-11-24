@@ -107,6 +107,9 @@ else\n\
   exec xdg-open "$@"\n\
 fi\n' > /usr/local/bin/super-agent-browser \
     && chmod +x /usr/local/bin/super-agent-browser \
+    && if [ -f /usr/share/applications/google-chrome.desktop ]; then \
+         sed -i 's|^Exec=/usr/bin/google-chrome-stable|Exec=/usr/local/bin/super-agent-browser|g' /usr/share/applications/google-chrome.desktop; \
+       fi \
     && mkdir -p /etc/opt/chrome/policies/managed \
     && printf '{\n  "BrowserSignin": 0,\n  "MetricsEnabled": false,\n  "DefaultBrowserSettingEnabled": false,\n  "PasswordManagerEnabled": false,\n  "SafeBrowsingProtectionLevel": 1\n}\n' > /etc/opt/chrome/policies/managed/super-agent.json
 

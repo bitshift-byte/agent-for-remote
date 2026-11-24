@@ -103,6 +103,18 @@ Terminal=false
 Categories=System;TerminalEmulator;
 EOF
 
+cat <<'EOF' > "${DESKTOP_DIR}/Workspace-Folder.desktop"
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=工作区
+Comment=Open /workspace synced repositories
+Exec=exo-open --launch FileManager /workspace
+Icon=folder-remote
+Terminal=false
+Categories=System;FileManager;
+EOF
+
 cat <<'EOF' > "${DESKTOP_DIR}/Display-Settings.desktop"
 [Desktop Entry]
 Version=1.0
@@ -161,6 +173,11 @@ XfdesktopIconView.view {
   -XfdesktopIconView-ellipsize-icon-labels: false;
 }
 EOF
+
+# Add /workspace to Thunar / GTK file-chooser sidebar bookmarks
+if ! grep -qx 'file:///workspace 工作区' "${GTK3_DIR}/bookmarks" 2>/dev/null; then
+  printf 'file:///workspace 工作区\n' >> "${GTK3_DIR}/bookmarks"
+fi
 
 # Passwordless unlocked keyring so Chrome/apps don't prompt
 if [ ! -f "${KEYRING_DIR}/default" ]; then

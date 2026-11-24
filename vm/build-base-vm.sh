@@ -30,7 +30,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
   xfce4 xfce4-terminal xfce4-whiskermenu-plugin dbus-x11 \
-  tigervnc-standalone-server tigervnc-common novnc websockify \
+  tigervnc-standalone-server tigervnc-common tigervnc-tools novnc websockify \
   arc-theme papirus-icon-theme fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
   fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 \
   gnome-keyring libsecret-1-0 libglib2.0-bin wmctrl x11-utils zenity \

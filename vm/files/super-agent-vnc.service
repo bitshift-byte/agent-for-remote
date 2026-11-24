@@ -10,7 +10,7 @@ WorkingDirectory=/home/ubuntu
 Environment=HOME=/home/ubuntu
 Environment=USER=ubuntu
 ExecStartPre=-/usr/bin/vncserver -kill :1
-ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes -SecurityTypes None
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-failure
 RestartSec=3

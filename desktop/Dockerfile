@@ -94,7 +94,7 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
 # - Chrome managed policies disable Google signin prompt, metrics consent and default-browser prompts
 RUN printf '#!/bin/sh\n\
 rm -f "${HOME:-/config}/.config/google-chrome"/Singleton* 2>/dev/null || true\n\
-CHROME_FLAGS="--no-sandbox --disable-dev-shm-usage --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync"\n\
+CHROME_FLAGS="--no-sandbox --test-type --disable-dev-shm-usage --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync"\n\
 if command -v google-chrome-stable >/dev/null 2>&1; then\n\
   exec google-chrome-stable $CHROME_FLAGS "$@"\n\
 elif command -v chromium >/dev/null 2>&1; then\n\
@@ -117,6 +117,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        gnome-keyring \
        libsecret-1-0 \
+       libglib2.0-bin \
        arc-theme \
        papirus-icon-theme \
        fonts-jetbrains-mono \
@@ -148,6 +149,7 @@ COPY scripts/sa-claude-hook /usr/local/bin/sa-claude-hook
 COPY scripts/sa-preview /usr/local/bin/sa-preview
 COPY scripts/sa-fit-windows /usr/local/bin/sa-fit-windows
 COPY scripts/sa-window-guard /usr/local/bin/sa-window-guard
+COPY scripts/sa-trust-desktop /usr/local/bin/sa-trust-desktop
 COPY scripts/sa-display /usr/local/bin/sa-display
 COPY scripts/super-agent-chatgpt /usr/local/bin/super-agent-chatgpt
 COPY scripts/super-agent-claude-desktop /usr/local/bin/super-agent-claude-desktop
@@ -158,6 +160,7 @@ RUN chmod +x \
     /usr/local/bin/sa-preview \
     /usr/local/bin/sa-fit-windows \
     /usr/local/bin/sa-window-guard \
+    /usr/local/bin/sa-trust-desktop \
     /usr/local/bin/sa-display \
     /usr/local/bin/super-agent-chatgpt \
     /usr/local/bin/super-agent-claude-desktop \

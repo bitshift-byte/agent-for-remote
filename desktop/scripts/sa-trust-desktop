@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Mark all XFCE desktop and panel .desktop launchers as trusted via GIO metadata
+# inside the live user D-Bus/GVFS session so XFCE 4.18 never prompts "Untrusted application launcher".
+set -u
+
+sleep 2
+
+trust_file() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  chmod +x "$f" 2>/dev/null || true
+  if command -v gio >/dev/null 2>&1; then
+    local sum
+    sum="$(sha256sum "$f" | awk '{print $1}')"
+    gio set -t string "$f" metadata::xfce-exe-checksum "$sum" 2>/dev/null || true
+    gio set -t boolean "$f" metadata::trusted true 2>/dev/null || true
+  fi
+}
+
+for f in "${HOME}/Desktop"/*.desktop "${HOME}/.config/xfce4/panel"/launcher-*/*.desktop; do
+  trust_file "$f"
+done
+
+# Refresh desktop icons so trusted badges and untruncated labels apply immediately
+if command -v xfdesktop >/dev/null 2>&1; then
+  xfdesktop --reload 2>/dev/null || true
+fi

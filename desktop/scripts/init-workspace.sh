@@ -348,13 +348,15 @@ EOF
 </channel>
 EOF
 
-  # GTK3 visual polish: crisp desktop label shadows, rounded hover states, and comfortable terminal padding
+  # GTK3 visual polish: crisp desktop label shadows, no icon label truncation, rounded hover states, and terminal padding
   cat <<'EOF' > "${GTK3_DIR}/gtk.css"
-/* Crisp desktop icon text over dark ambient wallpaper */
+/* Crisp desktop icon text over dark ambient wallpaper without truncation */
 XfdesktopIconView.view {
   background: transparent;
   color: #f8fafc;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  -XfdesktopIconView-cell-text-width-proportion: 2.5;
+  -XfdesktopIconView-ellipsize-icon-labels: false;
 }
 
 XfdesktopIconView.view:active,
@@ -419,12 +421,63 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-# Autostart GNOME Keyring daemon so ChatGPT & Claude Desktop sign-ins persist across container restarts
+# Always keep bottom Dock launchers clean and exact (prevents stale .desktop files in launcher-13 opening wrong app)
+for i in 11 12 13 14 15; do
+  mkdir -p "${PANEL_DIR}/launcher-${i}"
+  rm -f "${PANEL_DIR}/launcher-${i}"/*.desktop 2>/dev/null || true
+done
+cp -f "${DESKTOP_DIR}/ChatGPT.desktop" "${PANEL_DIR}/launcher-11/ChatGPT.desktop"
+cp -f "${DESKTOP_DIR}/Claude-Desktop.desktop" "${PANEL_DIR}/launcher-12/Claude-Desktop.desktop"
+cp -f "${DESKTOP_DIR}/Browser.desktop" "${PANEL_DIR}/launcher-13/Browser.desktop"
+cp -f "${DESKTOP_DIR}/Workspace-Terminal.desktop" "${PANEL_DIR}/launcher-14/Workspace-Terminal.desktop"
+cp -f "${DESKTOP_DIR}/Display-Settings.desktop" "${PANEL_DIR}/launcher-15/Display-Settings.desktop"
+chmod +x "${PANEL_DIR}"/launcher-*/*.desktop 2>/dev/null || true
+
+# Always ensure desktop icon labels are not ellipsized even on existing /config volumes
+if [ -f "${GTK3_DIR}/gtk.css" ] && ! grep -q "ellipsize-icon-labels" "${GTK3_DIR}/gtk.css"; then
+  cat <<'EOF' >> "${GTK3_DIR}/gtk.css"
+
+XfdesktopIconView.view {
+  -XfdesktopIconView-cell-text-width-proportion: 2.5;
+  -XfdesktopIconView-ellipsize-icon-labels: false;
+}
+EOF
+fi
+
+# Pre-seed an unlocked passwordless GNOME keyring so Chrome/ChatGPT/Claude never pop up a "Create keyring password" dialog
+KEYRING_DIR="${USER_HOME}/.local/share/keyrings"
+mkdir -p "${KEYRING_DIR}"
+if [ ! -f "${KEYRING_DIR}/default" ]; then
+  printf 'Default_keyring\n' > "${KEYRING_DIR}/default"
+  cat <<'EOF' > "${KEYRING_DIR}/Default_keyring.keyring"
+[keyring]
+display-name=Default keyring
+ctime=0
+mtime=0
+lock-on-idle=false
+lock-after=false
+EOF
+  chmod 600 "${KEYRING_DIR}/Default_keyring.keyring"
+fi
+chown -R abc:abc "${KEYRING_DIR}" || true
+
+# Autostart GNOME Keyring daemon (unlocked) so ChatGPT & Claude Desktop sign-ins persist without password prompts
 cat <<'EOF' > "${AUTOSTART_DIR}/gnome-keyring.desktop"
 [Desktop Entry]
 Type=Application
 Name=GNOME Keyring
-Exec=gnome-keyring-daemon --start --components=secrets
+Exec=sh -c 'printf "\n" | gnome-keyring-daemon --unlock --start --components=secrets'
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+EOF
+
+# Autostart GIO trust helper inside live D-Bus session so XFCE 4.18 never shows "Untrusted application launcher"
+cat <<'EOF' > "${AUTOSTART_DIR}/sa-trust-desktop.desktop"
+[Desktop Entry]
+Type=Application
+Name=Super-Agent Trust Desktop Launchers
+Exec=/usr/local/bin/sa-trust-desktop
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true

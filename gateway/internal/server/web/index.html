@@ -622,11 +622,12 @@
         <span style="font-weight:600;font-size:12px;">Super-Agent</span>
         <span style="color:var(--text-muted);font-size:12px;" id="bar-user"></span>
         <span class="topbar-sep"></span>
+        <span id="hud-stream-badge" class="status-badge badge-starting" style="font-size:11px;padding:2px 8px;">云桌面连接中…</span>
         <span id="hud-worker-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">检测本机...</span>
-        <span id="hud-tunnel-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;">隧道检测中…</span>
+        <span id="hud-tunnel-badge" class="status-badge badge-stopped" style="font-size:11px;padding:2px 8px;" title="仅表示本机 localhost 端口反向预览通道状态，与云桌面视频流独立">端口隧道检测中…</span>
       </div>
       <div class="topbar-right">
-        <div class="port-group" title="预览云桌面里运行的服务：填入端口（如 npm run dev 的 3000），点「预览」在新标签页打开">
+        <div class="port-group" title="预览本机运行中的开发服务：填入本机端口（如 3000），点「预览」在新标签页打开">
           <span>localhost:</span>
           <input id="hud-preview-port" type="text" placeholder="3000" />
           <button id="bar-preview" type="button">预览</button>
@@ -636,7 +637,7 @@
         <button id="bar-stop" class="btn-danger btn-sm" style="margin-left:10px;" title="停止并释放云桌面：断开会话，未保存的工作将丢失">停止</button>
       </div>
     </div>
-    <div id="desktop-connecting" style="position:fixed;inset:0;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0d10;">
+    <div id="desktop-connecting" style="position:fixed;top:40px;left:0;right:0;bottom:0;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0d10;">
       <div class="spinner"></div>
       <div style="font-weight:500;font-size:14px;color:#e7e9ec;">正在连接云桌面…</div>
       <div style="font-size:12px;color:#8b929b;">首次连接约需 10 秒，请稍候</div>
@@ -803,10 +804,10 @@
         const tb = $("hud-tunnel-badge");
         if (tunSt && tunSt.tunnel_online) {
           tb.className = "status-badge badge-running";
-          tb.textContent = "预览隧道就绪";
+          tb.textContent = "本机端口隧道在线";
         } else {
           tb.className = "status-badge badge-stopped";
-          tb.textContent = "预览隧道离线";
+          tb.textContent = "本机端口隧道离线";
         }
       } catch {}
     }
@@ -814,18 +815,30 @@
     function openDesktop(url) {
       const ov = $("desktop-connecting");
       const frame = $("desktop-iframe");
-      // Default the Selkies stats strip (fps/bandwidth overlay) to ON for first-time visitors.
-      // The /desktop/ iframe shares this origin's localStorage; key mirrors the dashboard's own scheme:
-      //   sanitize(origin + pathname) + "_stats_strip", read as === "true".
-      // Only set when absent so users can still turn the strip off themselves.
+      const sb = $("hud-stream-badge");
+      sb.className = "status-badge badge-starting";
+      sb.textContent = "云桌面连接中…";
+      // One-time migration: turn Selkies stats strip ON by default (including existing visitors
+      // whose localStorage previously cached "false"), while still honoring future manual toggles.
       try {
-        const stripKey = (location.origin + "/desktop/").replace(/[^a-zA-Z0-9._-]/g, "_") + "_stats_strip";
-        if (localStorage.getItem(stripKey) === null) localStorage.setItem(stripKey, "true");
+        const migKey = "sa-stats-strip-default-v1";
+        if (!localStorage.getItem(migKey)) {
+          for (const p of ["/desktop/", "/desktop"]) {
+            const k = (location.origin + p).replace(/[^a-zA-Z0-9._-]/g, "_") + "_stats_strip";
+            localStorage.setItem(k, "true");
+          }
+          localStorage.setItem(migKey, "1");
+        }
       } catch {}
       ov.style.display = "flex";
-      frame.onload = () => { ov.style.display = "none"; };
+      const markReady = () => {
+        ov.style.display = "none";
+        sb.className = "status-badge badge-running";
+        sb.textContent = "云桌面已连接";
+      };
+      frame.onload = () => { setTimeout(markReady, 400); };
       // Failsafe: never keep the splash longer than 20s
-      setTimeout(() => { ov.style.display = "none"; }, 20000);
+      setTimeout(markReady, 20000);
       frame.src = url || "/desktop/";
       showView("desktop");
       refreshDesktopHUD();

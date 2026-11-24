@@ -1,6 +1,6 @@
 #!/bin/sh
 if command -v chatgpt >/dev/null 2>&1; then
-  exec env SHELL=/usr/local/bin/sa-local-sh chatgpt --no-sandbox --disable-dev-shm-usage --start-maximized "$@"
+  exec env SHELL=/usr/local/bin/sa-local-sh chatgpt --no-sandbox --disable-dev-shm-usage --password-store=basic --start-maximized "$@"
 else
   exec /usr/local/bin/super-agent-browser --app=https://chatgpt.com --start-maximized "$@"
 fi

@@ -32,9 +32,13 @@ apt-get install -y --no-install-recommends \
   xfce4 xfce4-terminal xfce4-whiskermenu-plugin dbus-x11 \
   tigervnc-standalone-server tigervnc-common tigervnc-tools novnc websockify \
   arc-theme papirus-icon-theme fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
-  fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 \
+  locales fcitx5 fcitx5-pinyin fcitx5-chinese-addons fcitx5-frontend-gtk2 fcitx5-frontend-gtk3 fcitx5-frontend-qt5 fcitx5-config-qt im-config \
   gnome-keyring libsecret-1-0 libglib2.0-bin wmctrl x11-utils zenity \
   curl wget git jq ripgrep tmux vim python3 python3-pip build-essential ca-certificates gnupg
+
+# Generate UTF-8 Chinese & English locales so fcitx5 / XIM works reliably
+sed -i "/zh_CN.UTF-8/s/^# //g; /en_US.UTF-8/s/^# //g" /etc/locale.gen
+locale-gen zh_CN.UTF-8 en_US.UTF-8
 
 # Node.js 22 + Claude Code & Codex CLI
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

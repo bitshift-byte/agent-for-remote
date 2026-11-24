@@ -11,8 +11,9 @@ TERM_DIR="${USER_HOME}/.config/xfce4/terminal"
 GTK3_DIR="${USER_HOME}/.config/gtk-3.0"
 KEYRING_DIR="${USER_HOME}/.local/share/keyrings"
 CLAUDE_DIR="${USER_HOME}/.claude"
+FCITX_DIR="${USER_HOME}/.config/fcitx5"
 
-mkdir -p /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" /etc/opt/chrome/policies/managed
+mkdir -p /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" "${FCITX_DIR}" /etc/opt/chrome/policies/managed
 
 # Chrome managed policies (skip Google signin, metrics, default browser, password manager prompts)
 cat <<'EOF' > /etc/opt/chrome/policies/managed/super-agent.json
@@ -237,4 +238,51 @@ if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
 EOF
 fi
 
-chown -R "${USER_NAME}:${USER_NAME}" /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}"
+# Pre-configure fcitx5 with English keyboard + Chinese Pinyin so Ctrl+Space switches immediately
+cat <<'EOF' > /etc/profile.d/fcitx5.sh
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh:en_US:en
+export LC_ALL=zh_CN.UTF-8
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export SDL_IM_MODULE=fcitx
+export INPUT_METHOD=fcitx
+EOF
+chmod 0644 /etc/profile.d/fcitx5.sh
+
+if [ ! -f "${FCITX_DIR}/profile" ]; then
+  cat <<'EOF' > "${FCITX_DIR}/profile"
+[Groups/0]
+Name=Default
+Default Layout=us
+DefaultIM=pinyin
+
+[Groups/0/Items/0]
+Name=keyboard-us
+Layout=
+
+[Groups/0/Items/1]
+Name=pinyin
+Layout=
+
+[GroupOrder]
+0=Default
+EOF
+fi
+
+if [ ! -f "${FCITX_DIR}/config" ]; then
+  cat <<'EOF' > "${FCITX_DIR}/config"
+[Hotkey/TriggerKeys]
+0=Control+space
+1=Zenkaku_Hankaku
+2=Hangul
+
+[Behavior]
+ActiveByDefault=False
+ShareInputState=No
+ShowInputMethodInformation=True
+EOF
+fi
+
+chown -R "${USER_NAME}:${USER_NAME}" /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" "${FCITX_DIR}"

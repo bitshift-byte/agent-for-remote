@@ -302,4 +302,4 @@ ShowInputMethodInformation=True
 EOF
 fi
 
-chown -R "${USER_NAME}:${USER_NAME}" /workspace "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${CLAUDE_DIR}" "${FCITX_DIR}"
+chown -R "${USER_NAME}:${USER_NAME}" /workspace "${USER_HOME}/.config" "${USER_HOME}/.local" "${USER_HOME}/.claude" "${DESKTOP_DIR}" "${AUTOSTART_DIR}" "${XFCONF_DIR}" "${TERM_DIR}" "${GTK3_DIR}" "${KEYRING_DIR}" "${FCITX_DIR}"

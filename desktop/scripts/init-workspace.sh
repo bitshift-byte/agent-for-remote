@@ -403,7 +403,7 @@ ColorBackground=${TERM_BG}
 ColorCursor=${TERM_CURSOR}
 ColorPalette=#1e293b;#f87171;#4ade80;#facc15;#60a5fa;#c084fc;#22d3ee;#e2e8f0;#475569;#fca5a5;#86efac;#fde047;#93c5fd;#d8b4fe;#67e8f9;#f8fafc
 MiscMenubarDefault=FALSE
-MiscBordersDefault=FALSE
+MiscBordersDefault=TRUE
 ScrollingLines=10000
 EOF
 
@@ -432,6 +432,11 @@ cp -f "${DESKTOP_DIR}/Browser.desktop" "${PANEL_DIR}/launcher-13/Browser.desktop
 cp -f "${DESKTOP_DIR}/Workspace-Terminal.desktop" "${PANEL_DIR}/launcher-14/Workspace-Terminal.desktop"
 cp -f "${DESKTOP_DIR}/Display-Settings.desktop" "${PANEL_DIR}/launcher-15/Display-Settings.desktop"
 chmod +x "${PANEL_DIR}"/launcher-*/*.desktop 2>/dev/null || true
+
+# Always restore terminal window titlebar/close button on existing /config volumes
+if [ -f "${TERM_DIR}/terminalrc" ]; then
+  sed -i 's/^MiscBordersDefault=FALSE/MiscBordersDefault=TRUE/' "${TERM_DIR}/terminalrc" 2>/dev/null || true
+fi
 
 # Always ensure desktop icon labels are not ellipsized even on existing /config volumes
 if [ -f "${GTK3_DIR}/gtk.css" ] && ! grep -q "ellipsize-icon-labels" "${GTK3_DIR}/gtk.css"; then

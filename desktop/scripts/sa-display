@@ -90,7 +90,7 @@ ColorBackground=${bg}
 ColorCursor=${cursor}
 ColorPalette=#1e293b;#f87171;#4ade80;#facc15;#60a5fa;#c084fc;#22d3ee;#e2e8f0;#475569;#fca5a5;#86efac;#fde047;#93c5fd;#d8b4fe;#67e8f9;#f8fafc
 MiscMenubarDefault=FALSE
-MiscBordersDefault=FALSE
+MiscBordersDefault=TRUE
 ScrollingLines=10000
 EOF
     return

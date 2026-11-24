@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""
+Super-Agent Window Bounds Guard (sa-window-guard)
+Event-driven X11 daemon (via `xprop -root -spy _NET_CLIENT_LIST _NET_WORKAREA`) that ensures
+newly opened windows and windows after a screen resize NEVER overflow outside the usable
+XFCE work area (e.g. 1280x720 with 30px top panel).
+
+- Newly mapped windows that exceed or overflow the work area are automatically clamped or maximized.
+- Windows are only adjusted once on open (or when the desktop resolution changes), so manual
+  user dragging/resizing afterward is never overridden.
+"""
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+
+def get_workarea():
+    """Return (wx, wy, ww, wh) of the active desktop's usable work area via wmctrl -d."""
+    try:
+        out = subprocess.check_output(["wmctrl", "-d"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            # Example: 0  * DG: 1280x720  VP: 0,0  WA: 0,30 1280x690  Workspace 1
+            if " * " in line:
+                m = re.search(r"WA:\s*(\d+),(\d+)\s+(\d+)x(\d+)", line)
+                if m:
+                    return tuple(int(v) for v in m.groups())
+    except Exception:
+        pass
+    return None
+
+
+def list_windows():
+    """Return list of (wid, desktop, x, y, w, h, title) from wmctrl -lG."""
+    windows = []
+    try:
+        out = subprocess.check_output(["wmctrl", "-lG"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            parts = line.split(None, 7)
+            if len(parts) < 7:
+                continue
+            wid = parts[0]
+            try:
+                desk = int(parts[1])
+                x, y, w, h = int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5])
+            except ValueError:
+                continue
+            title = parts[7] if len(parts) > 7 else ""
+            windows.append((wid, desk, x, y, w, h, title))
+    except Exception:
+        pass
+    return windows
+
+
+def is_normal_window(wid):
+    """Skip docks, panels, desktop, splashes, and tooltips."""
+    try:
+        out = subprocess.check_output(
+            ["xprop", "-id", wid, "_NET_WM_WINDOW_TYPE"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        for skip in (
+            "_NET_WM_WINDOW_TYPE_DOCK",
+            "_NET_WM_WINDOW_TYPE_DESKTOP",
+            "_NET_WM_WINDOW_TYPE_SPLASH",
+            "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+            "_NET_WM_WINDOW_TYPE_TOOLTIP",
+            "_NET_WM_WINDOW_TYPE_POPUP_MENU",
+        ):
+            if skip in out:
+                return False
+    except Exception:
+        pass
+    return True
+
+
+def clamp_window(wid, x, y, w, h, wa):
+    wx, wy, ww, wh = wa
+    if ww < 320 or wh < 240 or w <= 0 or h <= 0:
+        return
+
+    # Account for typical XFCE titlebar + border (~34px height, ~8px width)
+    title_pad = 34
+    border_pad = 8
+    max_w = max(320, ww - border_pad)
+    max_h = max(240, wh - title_pad)
+
+    overflows = (
+        w > max_w
+        or h > max_h
+        or x < wx
+        or y < wy
+        or (x + w) > (wx + ww)
+        or (y + h) > (wy + wh)
+    )
+    if not overflows:
+        return
+
+    # If the window is trying to fill or exceed most of the screen, maximize it cleanly
+    if w >= int(ww * 0.90) or h >= int(wh * 0.88):
+        subprocess.run(
+            ["wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
+    # Otherwise remove maximize state (if partially stuck), clamp size, and shift inside work area
+    nw = min(w, max_w - 16)
+    nh = min(h, max_h - 16)
+    nx = max(wx + 4, min(x, wx + ww - nw - 4))
+    ny = max(wy + 4, min(y, wy + wh - nh - 4))
+
+    subprocess.run(
+        ["wmctrl", "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["wmctrl", "-i", "-r", wid, "-e", f"0,{nx},{ny},{nw},{nh}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def enforce_all(seen_wids, force_all=False):
+    wa = get_workarea()
+    if not wa:
+        return
+    current_wids = set()
+    for wid, desk, x, y, w, h, _title in list_windows():
+        if desk == -1:
+            continue
+        current_wids.add(wid)
+        if not force_all and wid in seen_wids:
+            continue
+        if not is_normal_window(wid):
+            seen_wids.add(wid)
+            continue
+        # Give freshly mapped Electron/Chrome windows a brief moment to finish initial resize
+        if not force_all:
+            time.sleep(0.18)
+            for wid2, _d2, x2, y2, w2, h2, _t2 in list_windows():
+                if wid2 == wid:
+                    x, y, w, h = x2, y2, w2, h2
+                    break
+        clamp_window(wid, x, y, w, h, wa)
+        seen_wids.add(wid)
+    # Prune closed windows
+    seen_wids.intersection_update(current_wids)
+
+
+def main():
+    if "--once" in sys.argv:
+        enforce_all(set(), force_all=True)
+        return
+
+    if not shutil.which("wmctrl"):
+        sys.exit(0)
+
+    seen_wids = set()
+    last_wa = None
+
+    # Initial pass for any windows already open at session start
+    time.sleep(1.5)
+    last_wa = get_workarea()
+    enforce_all(seen_wids, force_all=True)
+
+    # Event-driven watch via xprop -root -spy (0% CPU when idle)
+    if shutil.which("xprop"):
+        while True:
+            try:
+                proc = subprocess.Popen(
+                    ["xprop", "-root", "-spy", "_NET_CLIENT_LIST", "_NET_WORKAREA"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    wa = get_workarea()
+                    wa_changed = wa is not None and wa != last_wa
+                    if wa_changed:
+                        last_wa = wa
+                    enforce_all(seen_wids, force_all=wa_changed)
+                proc.wait()
+            except Exception:
+                pass
+            time.sleep(2.0)
+    else:
+        while True:
+            wa = get_workarea()
+            wa_changed = wa is not None and wa != last_wa
+            if wa_changed:
+                last_wa = wa
+            enforce_all(seen_wids, force_all=wa_changed)
+            time.sleep(1.5)
+
+
+if __name__ == "__main__":
+    main()

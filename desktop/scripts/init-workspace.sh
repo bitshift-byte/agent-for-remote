@@ -430,6 +430,17 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
+# Autostart Super-Agent Window Bounds Guard so newly opened apps never overflow outside the viewport
+cat <<'EOF' > "${AUTOSTART_DIR}/sa-window-guard.desktop"
+[Desktop Entry]
+Type=Application
+Name=Super-Agent Window Bounds Guard
+Exec=/usr/local/bin/sa-window-guard
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+EOF
+
 # Seed Claude Code PreToolUse hook (only if settings.json does not exist yet) so Claude Code
 # automatically receives cloud container resource limits & small-batch reminders when local machine is offline.
 CLAUDE_DIR="${USER_HOME}/.claude"

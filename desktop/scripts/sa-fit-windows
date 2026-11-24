@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Maximize all normal application windows so none overflow outside the Selkies viewport.
+# Snap and fit all overflowing application windows strictly inside the current desktop work area.
 set -euo pipefail
+
+if [ -x /usr/local/bin/sa-window-guard ]; then
+  exec /usr/local/bin/sa-window-guard --once
+fi
 
 if ! command -v wmctrl >/dev/null 2>&1; then
   echo "wmctrl is not installed." >&2
@@ -8,7 +12,6 @@ if ! command -v wmctrl >/dev/null 2>&1; then
 fi
 
 wmctrl -l | while read -r wid desk _host _title; do
-  # Skip sticky desktop/panel windows (desktop == -1)
   if [ "${desk}" = "-1" ]; then
     continue
   fi

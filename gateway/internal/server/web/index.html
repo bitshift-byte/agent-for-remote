@@ -733,9 +733,18 @@
         }
 
         const lockInfo = await api("/api/sync/lock").catch(() => null);
-        if (lockInfo && lockInfo.locked && lockInfo.lock) {
-          const l = lockInfo.lock;
-          $("status-sync-lock").textContent = `${l.device_name || l.device_id} (${l.os || "-"})`;
+        const allLocks = (lockInfo && Array.isArray(lockInfo.locks) && lockInfo.locks.length > 0)
+          ? lockInfo.locks
+          : (lockInfo && lockInfo.lock ? [lockInfo.lock] : []);
+        if (allLocks.length > 0) {
+          const byDev = new Map();
+          for (const l of allLocks) {
+            const key = l.device_name || l.device_id;
+            byDev.set(key, (byDev.get(key) || 0) + 1);
+          }
+          $("status-sync-lock").textContent = Array.from(byDev.entries())
+            .map(([name, cnt]) => cnt > 1 ? `${name} (${cnt}仓库)` : name)
+            .join(" · ");
         } else {
           $("status-sync-lock").textContent = "未连接";
         }
@@ -790,9 +799,19 @@
         const wb = $("hud-worker-badge");
         if (execSt && execSt.worker_online) {
           workerMissCount = 0;
-          const dev = execSt.active_lock ? (execSt.active_lock.device_name || execSt.active_lock.device_id) : "本机";
+          const devs = Array.isArray(execSt.online_devices) ? execSt.online_devices : [];
+          let label = "本机";
+          if (devs.length > 0) {
+            label = devs.map((d) => {
+              const n = d.device_name || d.device_id;
+              const m = Array.isArray(d.mounts) ? d.mounts.length : 0;
+              return m > 0 ? `${n}(${m})` : n;
+            }).join(" · ");
+          } else if (execSt.active_lock) {
+            label = execSt.active_lock.device_name || execSt.active_lock.device_id;
+          }
           wb.className = "status-badge badge-running";
-          wb.textContent = `本机在线 · ${dev}`;
+          wb.textContent = `本机在线 · ${label}`;
         } else if (++workerMissCount <= 1) {
           // Transient miss: show reconnecting instead of flapping to offline
           wb.className = "status-badge badge-starting";

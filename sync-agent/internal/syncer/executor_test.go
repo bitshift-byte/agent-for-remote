@@ -44,6 +44,32 @@ func TestRewriteWorkspacePath(t *testing.T) {
 	}
 }
 
+func TestMountPathResolutionAndRewrite(t *testing.T) {
+	if got := BuildMountPath("Work MacBook", "api-service"); got != "work-macbook/api-service" {
+		t.Fatalf("unexpected BuildMountPath: %q", got)
+	}
+
+	repoRoot := t.TempDir()
+	subDir := filepath.Join(repoRoot, "internal", "api")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	gotDir := ResolveWorkDirForMount(repoRoot, "work-mac/api-service", "/workspace/work-mac/api-service/internal/api")
+	if gotDir != subDir {
+		t.Fatalf("expected %q, got %q", subDir, gotDir)
+	}
+
+	gotCmd := RewriteWorkspacePathForMount(
+		"go test /workspace/work-mac/api-service/internal/api && ls /workspace/other/repo",
+		repoRoot,
+		"work-mac/api-service",
+	)
+	if !strings.Contains(gotCmd, repoRoot+"/internal/api") || !strings.Contains(gotCmd, "/workspace/other/repo") {
+		t.Fatalf("unexpected RewriteWorkspacePathForMount: %q", gotCmd)
+	}
+}
+
 func TestExecuteJobWithSyncBarriers(t *testing.T) {
 	cloud := &miniSyncServer{root: t.TempDir()}
 	localDir := t.TempDir()
@@ -57,7 +83,6 @@ func TestExecuteJobWithSyncBarriers(t *testing.T) {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
 
-	// Simulate AI editing a file in cloud /workspace right before calling Bash
 	_ = os.WriteFile(filepath.Join(cloud.root, "input.txt"), []byte("hello from cloud edit"), 0o644)
 
 	var syncMu sync.Mutex
@@ -76,7 +101,6 @@ func TestExecuteJobWithSyncBarriers(t *testing.T) {
 		t.Fatalf("pre-exec sync barrier did not pull input.txt before command ran; stdout=%q", res.Stdout)
 	}
 
-	// Verify Post-Exec Sync Barrier pushed output.txt back to cloud /workspace immediately
 	cloudOut, err := os.ReadFile(filepath.Join(cloud.root, "output.txt"))
 	if err != nil {
 		t.Fatalf("post-exec sync barrier did not push output.txt to cloud: %v", err)

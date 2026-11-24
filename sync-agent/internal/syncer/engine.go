@@ -71,6 +71,9 @@ func NewEngine(rootDir string, client *Client) (*Engine, error) {
 	serverScope := ""
 	if client != nil {
 		serverScope = strings.TrimRight(strings.TrimSpace(client.BaseURL()), "/")
+		if m := client.Mount(); m != "" {
+			serverScope = serverScope + "#" + m
+		}
 	}
 
 	e := &Engine{

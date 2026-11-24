@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,6 +19,7 @@ type ExecJob struct {
 	Username   string `json:"username"`
 	Command    string `json:"command"`
 	Cwd        string `json:"cwd"`
+	Mount      string `json:"mount,omitempty"`
 	TimeoutSec int    `json:"timeout_sec"`
 }
 
@@ -33,16 +35,29 @@ type ExecResult struct {
 }
 
 func (c *Client) PollExecJob(ctx context.Context, timeoutSec int) (*ExecJob, error) {
+	return c.PollExecJobWithMounts(ctx, timeoutSec, c.deviceName, nil)
+}
+
+func (c *Client) PollExecJobWithMounts(ctx context.Context, timeoutSec int, deviceName string, mounts []string) (*ExecJob, error) {
 	if timeoutSec <= 0 {
 		timeoutSec = 25
 	}
 	endpoint := fmt.Sprintf("/api/exec/poll?timeout=%d", timeoutSec)
+	if len(mounts) > 0 {
+		endpoint += "&mounts=" + url.QueryEscape(strings.Join(mounts, ","))
+	}
 	req, err := c.newAuthedRequest(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if deviceName != "" {
+		req.Header.Set("X-Device-Name", deviceName)
+	}
+	if len(mounts) > 0 {
+		req.Header.Set("X-Device-Mounts", strings.Join(mounts, ","))
+	}
 	if len(c.payloadKey) == 32 {
 		req.Header.Set(HeaderAcceptEnc, EncSchemeAES256GCM)
 	}

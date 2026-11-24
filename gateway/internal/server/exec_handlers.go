@@ -28,8 +28,10 @@ func (s *Server) handleExecStatus(w http.ResponseWriter, r *http.Request, userna
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"worker_online": s.execBroker.HasActiveWorker(username),
-		"active_lock":   s.syncSvc.Locks().Get(username),
+		"worker_online":  s.execBroker.HasActiveWorker(username),
+		"active_lock":    s.syncSvc.Locks().Get(username),
+		"active_locks":   s.syncSvc.Locks().ListUserLocks(username),
+		"online_devices": s.execBroker.OnlineDevices(username),
 	})
 }
 
@@ -81,7 +83,7 @@ func (s *Server) handleExecRun(w http.ResponseWriter, r *http.Request, username 
 	writeJSON(w, http.StatusOK, res)
 }
 
-// handleExecPoll is called by the local sync-agent holding the active device lock.
+// handleExecPoll is called by each connected local sync-agent holding one or more active device leases.
 func (s *Server) handleExecPoll(w http.ResponseWriter, r *http.Request, username string) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -98,10 +100,25 @@ func (s *Server) handleExecPoll(w http.ResponseWriter, r *http.Request, username
 		}
 	}
 
+	deviceID := strings.TrimSpace(r.Header.Get("X-Device-ID"))
+	deviceName := strings.TrimSpace(r.Header.Get("X-Device-Name"))
+	rawMounts := strings.TrimSpace(r.URL.Query().Get("mounts"))
+	if rawMounts == "" {
+		rawMounts = strings.TrimSpace(r.Header.Get("X-Device-Mounts"))
+	}
+	var mounts []string
+	if rawMounts != "" {
+		for _, part := range strings.Split(rawMounts, ",") {
+			if norm, err := syncsvc.NormalizeMountPath(part); err == nil && norm != "" {
+				mounts = append(mounts, norm)
+			}
+		}
+	}
+
 	pollCtx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	job, err := s.execBroker.Poll(pollCtx, username)
+	job, err := s.execBroker.PollDevice(pollCtx, username, deviceID, deviceName, mounts)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			w.WriteHeader(http.StatusNoContent)

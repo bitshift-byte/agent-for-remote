@@ -26,6 +26,7 @@ type FileEntry struct {
 
 type ManifestResponse struct {
 	Username   string               `json:"username"`
+	Mount      string               `json:"mount,omitempty"`
 	Files      map[string]FileEntry `json:"files"`
 	Dirs       []string             `json:"dirs"`
 	ActiveLock *DeviceLock          `json:"active_lock,omitempty"`
@@ -57,8 +58,39 @@ func (s *Service) UserWorkspaceDir(username string) (string, error) {
 	return dir, nil
 }
 
+// UserMountDir resolves the host directory for username and optional mount namespace ("<device>/<repo>").
+func (s *Service) UserMountDir(username, mount string) (string, error) {
+	base, err := s.UserWorkspaceDir(username)
+	if err != nil {
+		return "", err
+	}
+	normMount, err := NormalizeMountPath(mount)
+	if err != nil {
+		return "", err
+	}
+	if normMount == "" {
+		return base, nil
+	}
+	dir, err := ResolveSafeJoin(base, normMount)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create mount dir: %w", err)
+	}
+	return dir, nil
+}
+
 func (s *Service) BuildManifest(username string) (*ManifestResponse, error) {
-	root, err := s.UserWorkspaceDir(username)
+	return s.BuildManifestMount(username, "")
+}
+
+func (s *Service) BuildManifestMount(username, mount string) (*ManifestResponse, error) {
+	normMount, err := NormalizeMountPath(mount)
+	if err != nil {
+		return nil, err
+	}
+	root, err := s.UserMountDir(username, normMount)
 	if err != nil {
 		return nil, err
 	}
@@ -113,14 +145,19 @@ func (s *Service) BuildManifest(username string) (*ManifestResponse, error) {
 
 	return &ManifestResponse{
 		Username:   username,
+		Mount:      normMount,
 		Files:      files,
 		Dirs:       dirs,
-		ActiveLock: s.locks.Get(username),
+		ActiveLock: s.locks.GetMount(username, normMount),
 		ServerTime: time.Now().UTC().UnixNano(),
 	}, nil
 }
 
 func (s *Service) OpenFile(username, relPath string) (*os.File, *FileEntry, error) {
+	return s.OpenFileMount(username, "", relPath)
+}
+
+func (s *Service) OpenFileMount(username, mount, relPath string) (*os.File, *FileEntry, error) {
 	norm, err := NormalizeRelPath(relPath)
 	if err != nil {
 		return nil, nil, err
@@ -129,7 +166,7 @@ func (s *Service) OpenFile(username, relPath string) (*os.File, *FileEntry, erro
 		return nil, nil, ErrIgnoredPath
 	}
 
-	root, err := s.UserWorkspaceDir(username)
+	root, err := s.UserMountDir(username, mount)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -165,6 +202,10 @@ func (s *Service) OpenFile(username, relPath string) (*os.File, *FileEntry, erro
 }
 
 func (s *Service) WriteFile(username, relPath string, body io.Reader, modTimeNano int64, perm os.FileMode) (*FileEntry, error) {
+	return s.WriteFileMount(username, "", relPath, body, modTimeNano, perm)
+}
+
+func (s *Service) WriteFileMount(username, mount, relPath string, body io.Reader, modTimeNano int64, perm os.FileMode) (*FileEntry, error) {
 	norm, err := NormalizeRelPath(relPath)
 	if err != nil {
 		return nil, err
@@ -173,7 +214,7 @@ func (s *Service) WriteFile(username, relPath string, body io.Reader, modTimeNan
 		return nil, ErrIgnoredPath
 	}
 
-	root, err := s.UserWorkspaceDir(username)
+	root, err := s.UserMountDir(username, mount)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +283,10 @@ func (s *Service) WriteFile(username, relPath string, body io.Reader, modTimeNan
 }
 
 func (s *Service) DeleteFile(username, relPath string) error {
+	return s.DeleteFileMount(username, "", relPath)
+}
+
+func (s *Service) DeleteFileMount(username, mount, relPath string) error {
 	norm, err := NormalizeRelPath(relPath)
 	if err != nil {
 		return err
@@ -250,7 +295,7 @@ func (s *Service) DeleteFile(username, relPath string) error {
 		return ErrIgnoredPath
 	}
 
-	root, err := s.UserWorkspaceDir(username)
+	root, err := s.UserMountDir(username, mount)
 	if err != nil {
 		return err
 	}
@@ -267,6 +312,10 @@ func (s *Service) DeleteFile(username, relPath string) error {
 }
 
 func (s *Service) EnsureDir(username, relPath string) error {
+	return s.EnsureDirMount(username, "", relPath)
+}
+
+func (s *Service) EnsureDirMount(username, mount, relPath string) error {
 	norm, err := NormalizeRelPath(relPath)
 	if err != nil {
 		return err
@@ -275,7 +324,7 @@ func (s *Service) EnsureDir(username, relPath string) error {
 		return ErrIgnoredPath
 	}
 
-	root, err := s.UserWorkspaceDir(username)
+	root, err := s.UserMountDir(username, mount)
 	if err != nil {
 		return err
 	}
@@ -287,6 +336,10 @@ func (s *Service) EnsureDir(username, relPath string) error {
 }
 
 func (s *Service) DeleteDir(username, relPath string) error {
+	return s.DeleteDirMount(username, "", relPath)
+}
+
+func (s *Service) DeleteDirMount(username, mount, relPath string) error {
 	norm, err := NormalizeRelPath(relPath)
 	if err != nil {
 		return err
@@ -295,7 +348,7 @@ func (s *Service) DeleteDir(username, relPath string) error {
 		return ErrIgnoredPath
 	}
 
-	root, err := s.UserWorkspaceDir(username)
+	root, err := s.UserMountDir(username, mount)
 	if err != nil {
 		return err
 	}

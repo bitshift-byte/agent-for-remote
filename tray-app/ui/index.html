@@ -367,32 +367,32 @@
           <strong id="meta-device">-</strong>
         </div>
         <div class="meta-row">
-          <span>单活设备锁</span>
+          <span>同步状态</span>
           <strong id="meta-lock">未持有</strong>
         </div>
       </div>
 
       <div class="card">
+        <div class="section-title">挂载仓库（多仓库并行同步）</div>
+        <div class="section-sub">每个仓库自动挂载到云端 <code style="font-family:var(--mono);">/workspace/&lt;设备名&gt;/&lt;仓库名&gt;</code>；本地移除时云端目录保留不删。</div>
+        <div id="mounts-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
         <div class="field">
-          <label for="profile-select">项目快速切换</label>
+          <label for="mount-dir">添加本地仓库目录</label>
           <div class="row">
-            <select id="profile-select">
-              <option value="">选择已收藏项目</option>
-            </select>
-            <button id="btn-save-profile" type="button" class="btn-secondary">收藏当前</button>
+            <input id="mount-dir" class="mono" type="text" placeholder="选择本地仓库文件夹" />
+            <button id="btn-pick-mount" type="button" class="btn-secondary">选择</button>
           </div>
         </div>
         <div class="field">
-          <label for="bound-dir">当前工作区目录</label>
           <div class="row">
-            <input id="bound-dir" class="mono" type="text" placeholder="选择本地项目文件夹" />
-            <button id="btn-pick-bound" type="button" class="btn-secondary">更改</button>
+            <input id="mount-name" type="text" placeholder="云端仓库名（留空默认文件夹名）" />
+            <button id="btn-add-mount" type="button" class="btn-primary">添加挂载</button>
           </div>
         </div>
         <div class="btn-row">
-          <button id="btn-start" class="btn-primary">启动</button>
+          <button id="btn-start" class="btn-primary">启动全部</button>
           <button id="btn-stop" class="btn-danger">停止</button>
-          <button id="btn-takeover" class="btn-warn hidden">接管设备锁</button>
+          <button id="btn-takeover" class="btn-warn hidden">接管挂载锁</button>
           <button id="btn-open-web" class="btn-secondary">云桌面</button>
           <button id="btn-unbind" class="btn-secondary" style="margin-left:auto;">解绑</button>
         </div>

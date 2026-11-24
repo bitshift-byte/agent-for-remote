@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ type RunOptions struct {
 	Username   string
 	Secret     string
 	LocalDir   string
+	Mounts     []MountConfig
 	DeviceName string
 	Interval   time.Duration
 	Force      bool
@@ -25,6 +27,9 @@ type RunOptions struct {
 func RunDaemon(ctx context.Context, opts RunOptions) error {
 	if opts.Interval <= 0 {
 		opts.Interval = 800 * time.Millisecond
+	}
+	if len(opts.Mounts) > 0 {
+		return runMultiMountDaemon(ctx, opts)
 	}
 
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -89,7 +94,6 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 		log.Println("[sync] initial sync check complete — watching for changes...")
 	}
 
-	// Start reverse local command execution worker (with Pre/Post Sync Barriers) and local port preview tunnel
 	go RunExecLoop(runCtx, client, engine, &syncMu, func() {
 		log.Println("[lock] another device took over the workspace lock — pausing local exec & sync.")
 		cancelRun()
@@ -116,8 +120,6 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 					return nil
 				}
 				log.Printf("[lock] heartbeat warning: %v", err)
-			} else {
-				log.Printf("[lock] heartbeat ok (device=%s)", identity.DeviceName)
 			}
 		case <-syncTicker.C:
 			syncMu.Lock()
@@ -136,6 +138,140 @@ func RunDaemon(ctx context.Context, opts RunOptions) error {
 			}
 		}
 	}
+}
+
+func runMultiMountDaemon(ctx context.Context, opts RunOptions) error {
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	idDir := opts.LocalDir
+	if idDir == "" && len(opts.Mounts) > 0 {
+		idDir = opts.Mounts[0].Dir
+	}
+	identity, err := LoadOrCreateDeviceIdentity(idDir, opts.DeviceName)
+	if err != nil {
+		return fmt.Errorf("load device identity: %w", err)
+	}
+
+	baseClient := NewClient(opts.ServerURL)
+	if _, err := baseClient.Login(runCtx, opts.Username, opts.Secret); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+	log.Printf("[auth] logged in as %s on %s (device=%s, mounts=%d)", opts.Username, opts.ServerURL, identity.DeviceName, len(opts.Mounts))
+
+	type activeMount struct {
+		mountPath string
+		client    *Client
+		me        *MountEngine
+	}
+
+	active := make([]*activeMount, 0, len(opts.Mounts))
+	mountMap := make(map[string]*MountEngine)
+	var defaultMount *MountEngine
+
+	for _, mc := range opts.Mounts {
+		if mc.Enabled != nil && !*mc.Enabled {
+			continue
+		}
+		dir := strings.TrimSpace(mc.Dir)
+		if dir == "" {
+			continue
+		}
+		repoName := strings.TrimSpace(mc.Name)
+		if repoName == "" {
+			repoName = filepath.Base(dir)
+		}
+		mountPath := BuildMountPath(identity.DeviceName, repoName)
+		mcClient := baseClient.CloneForMount(mountPath)
+		acq, err := acquireLockInteractive(runCtx, mcClient, identity, opts.Force)
+		if err != nil {
+			return fmt.Errorf("acquire lock for %s: %w", mountPath, err)
+		}
+		eng, err := NewEngine(dir, mcClient)
+		if err != nil {
+			return fmt.Errorf("init sync engine for %s: %w", mountPath, err)
+		}
+		if acq.TakenOver {
+			if _, err := eng.InitialTakeoverPull(runCtx); err != nil {
+				return fmt.Errorf("takeover pull for %s: %w", mountPath, err)
+			}
+		}
+		me := &MountEngine{Mount: mountPath, Engine: eng, Mu: &sync.Mutex{}}
+		am := &activeMount{mountPath: mountPath, client: mcClient, me: me}
+		active = append(active, am)
+		mountMap[mountPath] = me
+		if defaultMount == nil {
+			defaultMount = me
+		}
+		log.Printf("[sync] mounted %s <-> /workspace/%s", dir, mountPath)
+	}
+
+	if len(active) == 0 {
+		return errors.New("no enabled mounts configured")
+	}
+
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		for _, am := range active {
+			_ = am.client.ReleaseLock(releaseCtx)
+		}
+		log.Printf("[lock] released %d mount locks", len(active))
+	}()
+
+	// Initial sync pass for every mount before going online for exec
+	for _, am := range active {
+		am.me.Mu.Lock()
+		err := runSyncPass(runCtx, am.me.Engine)
+		am.me.Mu.Unlock()
+		if err != nil {
+			log.Printf("[sync:%s] initial pass warning: %v", am.mountPath, err)
+		}
+	}
+
+	// Primary client (uses first mount's active lease token for device-level exec & tunnel channels)
+	primaryClient := active[0].client
+	go RunMultiExecLoop(runCtx, primaryClient, identity.DeviceName, mountMap, defaultMount, nil, func() {
+		log.Println("[lock] mount lock lost — pausing local exec.")
+		cancelRun()
+	})
+	go RunTunnelLoop(runCtx, primaryClient, func() {
+		log.Println("[lock] mount lock lost — pausing local preview tunnel.")
+		cancelRun()
+	})
+
+	var wg sync.WaitGroup
+	for _, am := range active {
+		wg.Add(1)
+		go func(m *activeMount) {
+			defer wg.Done()
+			syncTicker := time.NewTicker(opts.Interval)
+			hbTicker := time.NewTicker(15 * time.Second)
+			defer syncTicker.Stop()
+			defer hbTicker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-hbTicker.C:
+					if err := m.client.Heartbeat(runCtx); err != nil {
+						log.Printf("[lock:%s] heartbeat warning: %v", m.mountPath, err)
+					}
+				case <-syncTicker.C:
+					m.me.Mu.Lock()
+					err := runSyncPass(runCtx, m.me.Engine)
+					m.me.Mu.Unlock()
+					if err != nil {
+						log.Printf("[sync:%s] pass error: %v", m.mountPath, err)
+					}
+				}
+			}
+		}(am)
+	}
+
+	<-runCtx.Done()
+	wg.Wait()
+	return nil
 }
 
 func runSyncPass(ctx context.Context, engine *Engine) error {

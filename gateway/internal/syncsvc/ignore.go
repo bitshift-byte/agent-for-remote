@@ -52,6 +52,35 @@ func NormalizeRelPath(raw string) (string, error) {
 	return cleaned, nil
 }
 
+// NormalizeMountPath validates an optional multi-repo mount namespace such as "work-mac/api-service".
+// Empty string is allowed and represents the legacy root /workspace directory.
+func NormalizeMountPath(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	norm, err := NormalizeRelPath(trimmed)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(norm, "/")
+	if len(parts) > 2 {
+		return "", ErrInvalidPath
+	}
+	for _, seg := range parts {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", ErrInvalidPath
+		}
+		for _, r := range seg {
+			valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
+			if !valid {
+				return "", ErrInvalidPath
+			}
+		}
+	}
+	return norm, nil
+}
+
 // IsIgnored checks whether a slash-separated relative path matches default ignore rules.
 func IsIgnored(relPath string) bool {
 	cleaned := path.Clean(strings.ReplaceAll(relPath, "\\", "/"))

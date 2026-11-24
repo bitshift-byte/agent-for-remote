@@ -9,14 +9,21 @@ import (
 	"time"
 )
 
+type MountConfig struct {
+	Name    string `json:"name"`
+	Dir     string `json:"dir"`
+	Enabled *bool  `json:"enabled,omitempty"`
+}
+
 type FileConfig struct {
-	Server     string `json:"server"`
-	Username   string `json:"username"`
-	Token      string `json:"token"`
-	Dir        string `json:"dir"`
-	DeviceName string `json:"device_name"`
-	IntervalMs int    `json:"interval_ms"`
-	Force      bool   `json:"force"`
+	Server     string        `json:"server"`
+	Username   string        `json:"username"`
+	Token      string        `json:"token"`
+	Dir        string        `json:"dir"`
+	Mounts     []MountConfig `json:"mounts,omitempty"`
+	DeviceName string        `json:"device_name"`
+	IntervalMs int           `json:"interval_ms"`
+	Force      bool          `json:"force"`
 }
 
 func Main() {
@@ -46,7 +53,7 @@ func Main() {
 	if fc.IntervalMs > 0 {
 		interval = time.Duration(fc.IntervalMs) * time.Millisecond
 	}
-	if fc.Dir == "" {
+	if len(fc.Mounts) == 0 && fc.Dir == "" {
 		fc.Dir = "."
 	}
 
@@ -55,6 +62,7 @@ func Main() {
 		Username:   fc.Username,
 		Secret:     fc.Token,
 		LocalDir:   fc.Dir,
+		Mounts:     fc.Mounts,
 		DeviceName: fc.DeviceName,
 		Interval:   interval,
 		Force:      fc.Force,

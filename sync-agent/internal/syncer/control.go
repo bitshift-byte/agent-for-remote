@@ -22,6 +22,13 @@ type WorkspaceProfile struct {
 	Dir  string `json:"dir"`
 }
 
+type MountSpec struct {
+	Name      string `json:"name"`
+	Dir       string `json:"dir"`
+	Enabled   bool   `json:"enabled"`
+	MountPath string `json:"mount_path,omitempty"`
+}
+
 type LocalConfig struct {
 	Server        string             `json:"server"`
 	Username      string             `json:"username"`
@@ -29,6 +36,7 @@ type LocalConfig struct {
 	PayloadKeyB64 string             `json:"payload_key_b64,omitempty"`
 	Token         string             `json:"token,omitempty"`
 	Dir           string             `json:"dir"`
+	Mounts        []MountSpec        `json:"mounts,omitempty"`
 	Profiles      []WorkspaceProfile `json:"profiles,omitempty"`
 	DeviceName    string             `json:"device_name"`
 	IntervalMs    int                `json:"interval_ms"`
@@ -46,6 +54,7 @@ type StatusSnapshot struct {
 	Username         string             `json:"username"`
 	HasToken         bool               `json:"has_token"`
 	Dir              string             `json:"dir"`
+	Mounts           []MountSpec        `json:"mounts,omitempty"`
 	Profiles         []WorkspaceProfile `json:"profiles,omitempty"`
 	PendingApprovals []PendingApproval  `json:"pending_approvals,omitempty"`
 	DeviceName       string             `json:"device_name"`
@@ -159,6 +168,9 @@ func (c *Controller) loadConfig() {
 		if loaded.Dir != "" {
 			c.cfg.Dir = loaded.Dir
 		}
+		if len(loaded.Mounts) > 0 {
+			c.cfg.Mounts = loaded.Mounts
+		}
 		if len(loaded.Profiles) > 0 {
 			c.cfg.Profiles = loaded.Profiles
 		}
@@ -180,14 +192,35 @@ func (c *Controller) saveConfigLocked() error {
 	return os.WriteFile(c.cfgPath, raw, 0o600)
 }
 
+func enabledMountsForConfig(cfg LocalConfig, devName string) []MountSpec {
+	out := make([]MountSpec, 0, len(cfg.Mounts))
+	for _, m := range cfg.Mounts {
+		if !m.Enabled || strings.TrimSpace(m.Dir) == "" {
+			continue
+		}
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = filepath.Base(m.Dir)
+		}
+		m.Name = name
+		m.MountPath = BuildMountPath(devName, name)
+		out = append(out, m)
+	}
+	return out
+}
+
 func (c *Controller) Status() StatusSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	devID := ""
 	devOS := runtime.GOOS
+	devName := c.cfg.DeviceName
 	if c.identity != nil {
 		devID = c.identity.DeviceID
 		devOS = c.identity.OS
+		if devName == "" {
+			devName = c.identity.DeviceName
+		}
 	}
 	var lockedCopy *DeviceLock
 	if c.lockedBy != nil {
@@ -196,6 +229,19 @@ func (c *Controller) Status() StatusSnapshot {
 	}
 	bound := c.cfg.DeviceToken != "" || c.cfg.Token != ""
 	profilesCopy := append([]WorkspaceProfile(nil), c.cfg.Profiles...)
+	mountsCopy := make([]MountSpec, 0, len(c.cfg.Mounts))
+	for _, m := range c.cfg.Mounts {
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = filepath.Base(m.Dir)
+		}
+		mountsCopy = append(mountsCopy, MountSpec{
+			Name:      name,
+			Dir:       m.Dir,
+			Enabled:   m.Enabled,
+			MountPath: BuildMountPath(devName, name),
+		})
+	}
 	return StatusSnapshot{
 		State:            c.state,
 		Running:          c.state == "running" || c.state == "starting",
@@ -208,9 +254,10 @@ func (c *Controller) Status() StatusSnapshot {
 		Username:         c.cfg.Username,
 		HasToken:         bound,
 		Dir:              c.cfg.Dir,
+		Mounts:           mountsCopy,
 		Profiles:         profilesCopy,
 		PendingApprovals: c.approvals.Pending(),
-		DeviceName:       c.cfg.DeviceName,
+		DeviceName:       devName,
 		DeviceID:         devID,
 		OS:               devOS,
 		Logs:             c.logs.Snapshot(),
@@ -247,7 +294,7 @@ func (c *Controller) Pair(input, fallbackServer, dir, deviceName string) error {
 	c.cfg.Username = claimed.Username
 	c.cfg.DeviceToken = claimed.DeviceToken
 	c.cfg.PayloadKeyB64 = claimed.PayloadKeyB64
-	c.cfg.Token = "" // Clear any legacy password once bound via DeviceToken
+	c.cfg.Token = ""
 	if strings.TrimSpace(dir) != "" {
 		c.cfg.Dir = strings.TrimSpace(dir)
 	}
@@ -255,14 +302,14 @@ func (c *Controller) Pair(input, fallbackServer, dir, deviceName string) error {
 		c.cfg.DeviceName = strings.TrimSpace(deviceName)
 	}
 	err = c.saveConfigLocked()
-	hasDir := c.cfg.Dir != ""
+	hasTarget := c.cfg.Dir != "" || len(enabledMountsForConfig(c.cfg, id.DeviceName)) > 0
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
 
 	log.Printf("[pair] bound device %q to account %q on %s", id.DeviceName, claimed.Username, serverURL)
-	if hasDir {
+	if hasTarget {
 		return c.Start(false)
 	}
 	return nil
@@ -344,9 +391,14 @@ func (c *Controller) Start(force bool) error {
 
 	c.mu.Lock()
 	cfg := c.cfg
-	if cfg.Server == "" || (cfg.DeviceToken == "" && (cfg.Username == "" || cfg.Token == "")) || cfg.Dir == "" {
+	devName := cfg.DeviceName
+	if devName == "" && c.identity != nil {
+		devName = c.identity.DeviceName
+	}
+	hasMounts := len(enabledMountsForConfig(cfg, devName)) > 0
+	if cfg.Server == "" || (cfg.DeviceToken == "" && (cfg.Username == "" || cfg.Token == "")) || (!hasMounts && cfg.Dir == "") {
 		c.state = "error"
-		c.lastError = "请先完成 6 位配对码绑定并选择本地仓库目录"
+		c.lastError = "请先完成 6 位配对码绑定并添加至少一个本地仓库目录"
 		c.mu.Unlock()
 		return errors.New(c.lastError)
 	}
@@ -364,18 +416,7 @@ func (c *Controller) Start(force bool) error {
 	return nil
 }
 
-func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg LocalConfig, id *DeviceIdentity, force bool) {
-	defer close(done)
-
-	if id == nil {
-		var err error
-		id, err = LoadOrCreateDeviceIdentity(cfg.Dir, cfg.DeviceName)
-		if err != nil {
-			c.setError("error", fmt.Sprintf("device identity error: %v", err), nil)
-			return
-		}
-	}
-
+func (c *Controller) buildAuthedClient(ctx context.Context, cfg LocalConfig, id *DeviceIdentity) (*Client, error) {
 	client := NewClient(cfg.Server)
 	if cfg.DeviceToken != "" {
 		client.SetSession(cfg.DeviceToken, id.DeviceID, "")
@@ -387,15 +428,49 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 		} else {
 			log.Printf("[tray] authenticating with bound device token for %s on %s", cfg.Username, cfg.Server)
 		}
-	} else {
-		if _, err := client.Login(ctx, cfg.Username, cfg.Token); err != nil {
-			c.setError("error", fmt.Sprintf("登录失败: %v", err), nil)
+		return client, nil
+	}
+	if _, err := client.Login(ctx, cfg.Username, cfg.Token); err != nil {
+		return nil, fmt.Errorf("登录失败: %w", err)
+	}
+	log.Printf("[tray] logged in as %s on %s", cfg.Username, cfg.Server)
+	return client, nil
+}
+
+func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg LocalConfig, id *DeviceIdentity, force bool) {
+	defer close(done)
+
+	if id == nil {
+		var err error
+		idDir := cfg.Dir
+		if idDir == "" && len(cfg.Mounts) > 0 {
+			idDir = cfg.Mounts[0].Dir
+		}
+		id, err = LoadOrCreateDeviceIdentity(idDir, cfg.DeviceName)
+		if err != nil {
+			c.setError("error", fmt.Sprintf("device identity error: %v", err), nil)
 			return
 		}
-		log.Printf("[tray] logged in as %s on %s", cfg.Username, cfg.Server)
 	}
 
-	acq, err := client.AcquireLock(ctx, id.DeviceID, id.DeviceName, id.OS, force)
+	devName := cfg.DeviceName
+	if devName == "" {
+		devName = id.DeviceName
+	}
+	activeSpecs := enabledMountsForConfig(cfg, devName)
+	if len(activeSpecs) > 0 {
+		c.runMultiMountWorker(ctx, cfg, id, devName, activeSpecs, force)
+		return
+	}
+
+	// Legacy single-directory root /workspace mode
+	client, err := c.buildAuthedClient(ctx, cfg, id)
+	if err != nil {
+		c.setError("error", err.Error(), nil)
+		return
+	}
+
+	acq, err := client.AcquireLock(ctx, id.DeviceID, devName, id.OS, force)
 	if err != nil {
 		var conflictErr *LockConflictError
 		if errors.As(err, &conflictErr) {
@@ -444,7 +519,6 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
 
-	// Reconnect Sync-Before-Exec: reconcile all cloud changes locally BEFORE registering as an active exec worker.
 	syncMu.Lock()
 	initErr := runSyncPass(workerCtx, engine)
 	syncMu.Unlock()
@@ -511,6 +585,169 @@ func (c *Controller) runWorker(ctx context.Context, done chan struct{}, cfg Loca
 			}
 		}
 	}
+}
+
+func (c *Controller) runMultiMountWorker(ctx context.Context, cfg LocalConfig, id *DeviceIdentity, devName string, specs []MountSpec, force bool) {
+	baseClient, err := c.buildAuthedClient(ctx, cfg, id)
+	if err != nil {
+		c.setError("error", err.Error(), nil)
+		return
+	}
+
+	type activeMount struct {
+		spec   MountSpec
+		client *Client
+		me     *MountEngine
+	}
+
+	active := make([]*activeMount, 0, len(specs))
+	mountMap := make(map[string]*MountEngine)
+	var defaultMount *MountEngine
+	var maxEpoch int64
+
+	releaseAll := func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		for _, am := range active {
+			_ = am.client.ReleaseLock(releaseCtx)
+		}
+		if len(active) > 0 {
+			log.Printf("[lock] released %d mount locks", len(active))
+		}
+	}
+	defer releaseAll()
+
+	for _, sp := range specs {
+		mcClient := baseClient.CloneForMount(sp.MountPath)
+		acq, err := mcClient.AcquireLock(ctx, id.DeviceID, devName, id.OS, force)
+		if err != nil {
+			var conflictErr *LockConflictError
+			if errors.As(err, &conflictErr) {
+				c.setError("conflict", fmt.Sprintf("挂载点 %s 正被其他设备同步，请确认是否接管", sp.MountPath), conflictErr.LockedBy)
+				return
+			}
+			if strings.Contains(err.Error(), "401") {
+				c.setError("error", "设备凭证已失效或已在网页端解绑，请重新输入 6 位配对码绑定", nil)
+				return
+			}
+			c.setError("error", fmt.Sprintf("获取挂载点 %s 锁失败: %v", sp.MountPath, err), nil)
+			return
+		}
+		if acq.Lock != nil && acq.Lock.Epoch > maxEpoch {
+			maxEpoch = acq.Lock.Epoch
+		}
+
+		eng, err := NewEngine(sp.Dir, mcClient)
+		if err != nil {
+			c.setError("error", fmt.Sprintf("初始化 %s 同步引擎失败: %v", sp.Name, err), nil)
+			return
+		}
+		if acq.TakenOver {
+			log.Printf("[lock:%s] took over from %q — pulling latest cloud files...", sp.MountPath, acq.PreviousDev)
+			if _, err := eng.InitialTakeoverPull(ctx); err != nil {
+				c.setError("error", fmt.Sprintf("接管 %s 拉取失败: %v", sp.Name, err), nil)
+				return
+			}
+		}
+
+		me := &MountEngine{Mount: sp.MountPath, Engine: eng, Mu: &sync.Mutex{}}
+		am := &activeMount{spec: sp, client: mcClient, me: me}
+		active = append(active, am)
+		mountMap[sp.MountPath] = me
+		if defaultMount == nil {
+			defaultMount = me
+		}
+		log.Printf("[sync] mounted %s <-> /workspace/%s", sp.Dir, sp.MountPath)
+	}
+
+	c.mu.Lock()
+	c.state = "running"
+	c.lastError = ""
+	c.lockedBy = nil
+	c.epoch = maxEpoch
+	c.mu.Unlock()
+
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
+
+	for _, am := range active {
+		am.me.Mu.Lock()
+		initErr := runSyncPass(workerCtx, am.me.Engine)
+		am.me.Mu.Unlock()
+		if initErr != nil {
+			if errors.Is(initErr, ErrMassDeleteBlocked) {
+				log.Printf("[sync:%s] ⛔ %v", am.spec.MountPath, initErr)
+				c.setError("error", fmt.Sprintf("⚠️ 已拦截云端批量删除本地仓库 %s：%v", am.spec.Name, initErr), nil)
+				return
+			}
+			log.Printf("[sync:%s] initial sync warning: %v", am.spec.MountPath, initErr)
+		}
+	}
+
+	primaryClient := active[0].client
+	go RunMultiExecLoop(workerCtx, primaryClient, devName, mountMap, defaultMount, c.approvals, func() {
+		log.Println("[lock] mount lock lost — paused local exec")
+		c.setError("lock_lost", "挂载锁已被其他设备接管，本机已自动暂停", nil)
+		cancelWorker()
+	})
+	go RunTunnelLoop(workerCtx, primaryClient, func() {
+		log.Println("[lock] mount lock lost — paused preview tunnel")
+		c.setError("lock_lost", "挂载锁已被其他设备接管，本机已自动暂停", nil)
+		cancelWorker()
+	})
+
+	interval := time.Duration(cfg.IntervalMs) * time.Millisecond
+	if interval <= 0 {
+		interval = 800 * time.Millisecond
+	}
+
+	var wg sync.WaitGroup
+	for _, am := range active {
+		wg.Add(1)
+		go func(m *activeMount) {
+			defer wg.Done()
+			syncTicker := time.NewTicker(interval)
+			hbTicker := time.NewTicker(15 * time.Second)
+			defer syncTicker.Stop()
+			defer hbTicker.Stop()
+			for {
+				select {
+				case <-workerCtx.Done():
+					return
+				case <-hbTicker.C:
+					if err := m.client.Heartbeat(workerCtx); err != nil {
+						if errors.Is(err, ErrLockLost) {
+							c.setError("lock_lost", fmt.Sprintf("挂载点 %s 已被其他设备接管", m.spec.MountPath), nil)
+							cancelWorker()
+							return
+						}
+						log.Printf("[lock:%s] heartbeat warning: %v", m.spec.MountPath, err)
+					}
+				case <-syncTicker.C:
+					m.me.Mu.Lock()
+					err := runSyncPass(workerCtx, m.me.Engine)
+					m.me.Mu.Unlock()
+					if err != nil {
+						if errors.Is(err, ErrLockLost) {
+							c.setError("lock_lost", fmt.Sprintf("挂载点 %s 已被其他设备接管", m.spec.MountPath), nil)
+							cancelWorker()
+							return
+						}
+						if errors.Is(err, ErrMassDeleteBlocked) {
+							log.Printf("[sync:%s] ⛔ %v", m.spec.MountPath, err)
+							c.setError("error", fmt.Sprintf("⚠️ 已拦截云端批量删除本地仓库 %s：%v", m.spec.Name, err), nil)
+							cancelWorker()
+							return
+						}
+						log.Printf("[sync:%s] pass error: %v", m.spec.MountPath, err)
+					}
+				}
+			}
+		}(am)
+	}
+
+	<-workerCtx.Done()
+	wg.Wait()
 }
 
 func (c *Controller) setError(state, msg string, lockedBy *DeviceLock) {
@@ -608,14 +845,25 @@ func (c *Controller) ServeControlAPI(addr string) error {
 		c.Stop()
 		c.mu.Lock()
 		dir := c.cfg.Dir
-		srv := c.cfg.Server
+		mounts := append([]MountSpec(nil), c.cfg.Mounts...)
+		srv := strings.TrimRight(strings.TrimSpace(c.cfg.Server), "/")
+		devName := c.cfg.DeviceName
+		if devName == "" && c.identity != nil {
+			devName = c.identity.DeviceName
+		}
 		c.mu.Unlock()
 		if dir != "" {
 			if abs, err := filepath.Abs(dir); err == nil {
-				_ = os.Remove(stateFilePath(strings.TrimRight(strings.TrimSpace(srv), "/"), abs))
+				_ = os.Remove(stateFilePath(srv, abs))
 			}
 		}
-		log.Printf("[sync] reset local sync baseline for %s (server=%s)", dir, srv)
+		for _, m := range mounts {
+			if abs, err := filepath.Abs(m.Dir); err == nil {
+				mp := BuildMountPath(devName, m.Name)
+				_ = os.Remove(stateFilePath(srv+"#"+mp, abs))
+			}
+		}
+		log.Printf("[sync] reset local sync baselines (server=%s)", srv)
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
 	mux.HandleFunc("/local/approvals/decide", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +882,102 @@ func (c *Controller) ServeControlAPI(addr string) error {
 		if !c.approvals.Decide(req.JobID, req.Approve) {
 			writeLocalJSON(w, http.StatusNotFound, map[string]string{"error": "approval request expired or not found"})
 			return
+		}
+		writeLocalJSON(w, http.StatusOK, c.Status())
+	}))
+	// Multi-repo mount management: add, toggle, remove (removing a local mount preserves cloud files).
+	mux.HandleFunc("/local/mounts", c.withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeLocalJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			Action  string `json:"action"` // "add", "toggle", "remove"
+			Name    string `json:"name"`
+			Dir     string `json:"dir"`
+			Enabled *bool  `json:"enabled,omitempty"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		dir := strings.TrimSpace(req.Dir)
+		name := strings.TrimSpace(req.Name)
+		if name == "" && dir != "" {
+			name = filepath.Base(dir)
+		}
+
+		c.mu.Lock()
+		wasRunning := c.cancel != nil
+		bound := c.cfg.DeviceToken != "" || c.cfg.Token != ""
+		switch req.Action {
+		case "add":
+			if dir == "" {
+				c.mu.Unlock()
+				writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "dir is required"})
+				return
+			}
+			updated := false
+			for i := range c.cfg.Mounts {
+				if c.cfg.Mounts[i].Dir == dir {
+					c.cfg.Mounts[i].Name = name
+					c.cfg.Mounts[i].Enabled = true
+					updated = true
+					break
+				}
+			}
+			if !updated {
+				c.cfg.Mounts = append(c.cfg.Mounts, MountSpec{
+					Name:    name,
+					Dir:     dir,
+					Enabled: true,
+				})
+			}
+		case "toggle":
+			if dir == "" {
+				c.mu.Unlock()
+				writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "dir is required"})
+				return
+			}
+			for i := range c.cfg.Mounts {
+				if c.cfg.Mounts[i].Dir == dir {
+					if req.Enabled != nil {
+						c.cfg.Mounts[i].Enabled = *req.Enabled
+					} else {
+						c.cfg.Mounts[i].Enabled = !c.cfg.Mounts[i].Enabled
+					}
+					break
+				}
+			}
+		case "remove":
+			// Remove from local mount list only; cloud /workspace/<device>/<repo> folder is intentionally preserved.
+			next := make([]MountSpec, 0, len(c.cfg.Mounts))
+			for _, m := range c.cfg.Mounts {
+				if m.Dir != dir {
+					next = append(next, m)
+				}
+			}
+			c.cfg.Mounts = next
+		default:
+			c.mu.Unlock()
+			writeLocalJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+			return
+		}
+		_ = c.saveConfigLocked()
+		devName := c.cfg.DeviceName
+		if devName == "" && c.identity != nil {
+			devName = c.identity.DeviceName
+		}
+		hasActive := len(enabledMountsForConfig(c.cfg, devName)) > 0 || c.cfg.Dir != ""
+		c.mu.Unlock()
+
+		if wasRunning {
+			c.Stop()
+			if hasActive {
+				_ = c.Start(false)
+			}
+		} else if bound && req.Action == "add" && hasActive {
+			_ = c.Start(false)
 		}
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
@@ -706,14 +1050,21 @@ func (c *Controller) ServeControlAPI(addr string) error {
 		writeLocalJSON(w, http.StatusOK, c.Status())
 	}))
 
-	// Auto-start on boot if already bound and directory is configured
+	// Auto-start on boot if already bound and at least one mount or directory is configured
 	st := c.Status()
-	if st.Server != "" && st.Bound && st.Dir != "" {
-		log.Printf("[tray] auto-starting saved workspace sync: %s", st.Dir)
+	hasEnabledMount := false
+	for _, m := range st.Mounts {
+		if m.Enabled {
+			hasEnabledMount = true
+			break
+		}
+	}
+	if st.Server != "" && st.Bound && (hasEnabledMount || st.Dir != "") {
+		log.Printf("[tray] auto-starting saved workspace sync (mounts=%d, legacy_dir=%s)", len(st.Mounts), st.Dir)
 		_ = c.Start(false)
 	}
 
-	// Auto-exit when parent tray app terminates (prevents orphaned zombie processes on Ctrl+C / crash)
+	// Auto-exit when parent tray app terminates
 	go func() {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		log.Println("[tray] parent process closed stdin — exiting sync-agent")

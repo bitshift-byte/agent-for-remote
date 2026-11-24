@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,10 +19,30 @@ import (
 var (
 	ErrLockConflict = errors.New("active device lock held by another device")
 	ErrLockLost     = errors.New("device lock was lost or taken over by another device")
+	mountSlugRe     = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 )
+
+// SanitizeMountSegment turns a device name or repo folder name into a safe single path segment.
+func SanitizeMountSegment(raw, fallback string) string {
+	s := strings.TrimSpace(raw)
+	s = mountSlugRe.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-.")
+	if s == "" {
+		return fallback
+	}
+	return strings.ToLower(s)
+}
+
+// BuildMountPath builds a normalized two-level mount path "<device-slug>/<repo-slug>".
+func BuildMountPath(deviceName, repoName string) string {
+	dev := SanitizeMountSegment(deviceName, "device")
+	repo := SanitizeMountSegment(repoName, "repo")
+	return dev + "/" + repo
+}
 
 type DeviceLock struct {
 	Username      string    `json:"username"`
+	Mount         string    `json:"mount,omitempty"`
 	DeviceID      string    `json:"device_id"`
 	DeviceName    string    `json:"device_name"`
 	OS            string    `json:"os"`
@@ -64,6 +85,7 @@ type FileEntry struct {
 
 type ManifestResponse struct {
 	Username   string               `json:"username"`
+	Mount      string               `json:"mount,omitempty"`
 	Files      map[string]FileEntry `json:"files"`
 	Dirs       []string             `json:"dirs"`
 	ActiveLock *DeviceLock          `json:"active_lock,omitempty"`
@@ -75,7 +97,9 @@ type Client struct {
 	httpClient *http.Client
 	token      string
 	deviceID   string
+	deviceName string
 	leaseToken string
+	mount      string
 	payloadKey []byte
 }
 
@@ -101,12 +125,58 @@ func (c *Client) SetSession(token, deviceID, leaseToken string) {
 	c.leaseToken = leaseToken
 }
 
+func (c *Client) SetMount(mount string) {
+	c.mount = strings.Trim(strings.TrimSpace(mount), "/")
+}
+
+func (c *Client) Mount() string {
+	if c == nil {
+		return ""
+	}
+	return c.mount
+}
+
+func (c *Client) LeaseToken() string {
+	if c == nil {
+		return ""
+	}
+	return c.leaseToken
+}
+
+// CloneForMount creates a mount-scoped Client sharing auth credentials and HTTP transport.
+func (c *Client) CloneForMount(mount string) *Client {
+	cp := &Client{
+		baseURL:    c.baseURL,
+		httpClient: c.httpClient,
+		token:      c.token,
+		deviceID:   c.deviceID,
+		deviceName: c.deviceName,
+		leaseToken: c.leaseToken,
+		mount:      strings.Trim(strings.TrimSpace(mount), "/"),
+	}
+	if len(c.payloadKey) == 32 {
+		cp.payloadKey = append([]byte(nil), c.payloadKey...)
+	}
+	return cp
+}
+
 func (c *Client) SetPayloadKey(key []byte) {
 	if len(key) == 32 {
 		c.payloadKey = append([]byte(nil), key...)
 	} else {
 		c.payloadKey = nil
 	}
+}
+
+func (c *Client) appendMountQuery(endpoint string) string {
+	if c.mount == "" {
+		return endpoint
+	}
+	sep := "?"
+	if strings.Contains(endpoint, "?") {
+		sep = "&"
+	}
+	return endpoint + sep + "mount=" + url.QueryEscape(c.mount)
 }
 
 func (c *Client) Login(ctx context.Context, username, password string) (string, error) {
@@ -145,12 +215,16 @@ func (c *Client) Login(ctx context.Context, username, password string) (string, 
 }
 
 func (c *Client) AcquireLock(ctx context.Context, deviceID, deviceName, osName string, force bool) (*AcquireResponse, error) {
-	payload, _ := json.Marshal(map[string]any{
+	bodyMap := map[string]any{
 		"device_id":   deviceID,
 		"device_name": deviceName,
 		"os":          osName,
 		"force":       force,
-	})
+	}
+	if c.mount != "" {
+		bodyMap["mount"] = c.mount
+	}
+	payload, _ := json.Marshal(bodyMap)
 	req, err := c.newAuthedRequest(ctx, http.MethodPost, "/api/sync/lock/acquire", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
@@ -184,6 +258,7 @@ func (c *Client) AcquireLock(ctx context.Context, deviceID, deviceName, osName s
 		return nil, err
 	}
 	c.deviceID = deviceID
+	c.deviceName = deviceName
 	if out.Lock != nil {
 		c.leaseToken = out.Lock.LeaseToken
 	}
@@ -191,10 +266,14 @@ func (c *Client) AcquireLock(ctx context.Context, deviceID, deviceName, osName s
 }
 
 func (c *Client) Heartbeat(ctx context.Context) error {
-	payload, _ := json.Marshal(map[string]string{
+	bodyMap := map[string]string{
 		"device_id":   c.deviceID,
 		"lease_token": c.leaseToken,
-	})
+	}
+	if c.mount != "" {
+		bodyMap["mount"] = c.mount
+	}
+	payload, _ := json.Marshal(bodyMap)
 	req, err := c.newAuthedRequest(ctx, http.MethodPost, "/api/sync/lock/heartbeat", bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -221,10 +300,14 @@ func (c *Client) ReleaseLock(ctx context.Context) error {
 	if c.deviceID == "" || c.leaseToken == "" {
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]string{
+	bodyMap := map[string]string{
 		"device_id":   c.deviceID,
 		"lease_token": c.leaseToken,
-	})
+	}
+	if c.mount != "" {
+		bodyMap["mount"] = c.mount
+	}
+	payload, _ := json.Marshal(bodyMap)
 	req, err := c.newAuthedRequest(ctx, http.MethodPost, "/api/sync/lock/release", bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -240,7 +323,7 @@ func (c *Client) ReleaseLock(ctx context.Context) error {
 }
 
 func (c *Client) GetManifest(ctx context.Context) (*ManifestResponse, error) {
-	req, err := c.newAuthedRequest(ctx, http.MethodGet, "/api/sync/manifest", nil)
+	req, err := c.newAuthedRequest(ctx, http.MethodGet, c.appendMountQuery("/api/sync/manifest"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +348,7 @@ func (c *Client) GetManifest(ctx context.Context) (*ManifestResponse, error) {
 }
 
 func (c *Client) DownloadFile(ctx context.Context, relPath string) ([]byte, int64, os.FileMode, error) {
-	endpoint := "/api/sync/file?path=" + url.QueryEscape(relPath)
+	endpoint := c.appendMountQuery("/api/sync/file?path=" + url.QueryEscape(relPath))
 	req, err := c.newAuthedRequest(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, 0, err
@@ -331,13 +414,16 @@ func (c *Client) UploadFile(ctx context.Context, relPath string, fullPath string
 		bodyReader = f
 	}
 
-	endpoint := "/api/sync/file?path=" + url.QueryEscape(relPath)
+	endpoint := c.appendMountQuery("/api/sync/file?path=" + url.QueryEscape(relPath))
 	req, err := c.newAuthedRequest(ctx, http.MethodPut, endpoint, bodyReader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if c.mount != "" {
+		req.Header.Set("X-Sync-Mount", c.mount)
+	}
 	req.Header.Set("X-File-ModTime", strconv.FormatInt(modTimeNano, 10))
 	req.Header.Set("X-File-Mode", strconv.FormatUint(uint64(perm.Perm()), 8))
 	if encrypted {
@@ -366,13 +452,16 @@ func (c *Client) UploadFile(ctx context.Context, relPath string, fullPath string
 }
 
 func (c *Client) DeleteFile(ctx context.Context, relPath string) error {
-	endpoint := "/api/sync/file?path=" + url.QueryEscape(relPath)
+	endpoint := c.appendMountQuery("/api/sync/file?path=" + url.QueryEscape(relPath))
 	req, err := c.newAuthedRequest(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if c.mount != "" {
+		req.Header.Set("X-Sync-Mount", c.mount)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -391,13 +480,16 @@ func (c *Client) DeleteFile(ctx context.Context, relPath string) error {
 }
 
 func (c *Client) CreateDir(ctx context.Context, relPath string) error {
-	endpoint := "/api/sync/dir?path=" + url.QueryEscape(relPath)
+	endpoint := c.appendMountQuery("/api/sync/dir?path=" + url.QueryEscape(relPath))
 	req, err := c.newAuthedRequest(ctx, http.MethodPut, endpoint, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if c.mount != "" {
+		req.Header.Set("X-Sync-Mount", c.mount)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -416,13 +508,16 @@ func (c *Client) CreateDir(ctx context.Context, relPath string) error {
 }
 
 func (c *Client) DeleteDir(ctx context.Context, relPath string) error {
-	endpoint := "/api/sync/dir?path=" + url.QueryEscape(relPath)
+	endpoint := c.appendMountQuery("/api/sync/dir?path=" + url.QueryEscape(relPath))
 	req, err := c.newAuthedRequest(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-Device-ID", c.deviceID)
 	req.Header.Set("X-Lease-Token", c.leaseToken)
+	if c.mount != "" {
+		req.Header.Set("X-Sync-Mount", c.mount)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,13 @@ var blockedCommandPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bshutdown\b|\breboot\b`),
 }
 
+// MountEngine pairs a mount namespace ("<device>/<repo>") with its local sync Engine and mutex.
+type MountEngine struct {
+	Mount  string
+	Engine *Engine
+	Mu     *sync.Mutex
+}
+
 // ValidateCommand applies local safety guardrails so cloud-forwarded commands stay scoped and non-destructive.
 func ValidateCommand(command string) error {
 	trimmed := strings.TrimSpace(command)
@@ -45,18 +53,26 @@ func ValidateCommand(command string) error {
 }
 
 // ResolveWorkDir maps the cloud container's /workspace[/sub] path to the local synced repository directory.
-// Any path outside /workspace is safely clamped to localRoot.
 func ResolveWorkDir(localRoot, cloudCwd string) string {
+	return ResolveWorkDirForMount(localRoot, "", cloudCwd)
+}
+
+// ResolveWorkDirForMount maps /workspace[/<mount>][/sub] to the corresponding local repository directory.
+func ResolveWorkDirForMount(localRoot, mount, cloudCwd string) string {
 	absRoot, err := filepath.Abs(localRoot)
 	if err != nil {
 		return localRoot
 	}
 	c := strings.TrimSpace(cloudCwd)
-	if c == "" || c == "/workspace" || c == "/workspace/" {
+	mountPrefix := "/workspace"
+	if m := strings.Trim(strings.TrimSpace(mount), "/"); m != "" {
+		mountPrefix = "/workspace/" + m
+	}
+	if c == "" || c == mountPrefix || c == mountPrefix+"/" || c == "/workspace" || c == "/workspace/" {
 		return absRoot
 	}
-	if strings.HasPrefix(c, "/workspace/") {
-		rel := strings.TrimPrefix(c, "/workspace/")
+	if strings.HasPrefix(c, mountPrefix+"/") {
+		rel := strings.TrimPrefix(c, mountPrefix+"/")
 		joined := filepath.Clean(filepath.Join(absRoot, filepath.FromSlash(rel)))
 		if joined == absRoot || strings.HasPrefix(joined, absRoot+string(filepath.Separator)) {
 			if info, err := os.Stat(joined); err == nil && info.IsDir() {
@@ -69,32 +85,61 @@ func ResolveWorkDir(localRoot, cloudCwd string) string {
 
 var workspaceTokenRe = regexp.MustCompile(`(^|[\s"'=:])/workspace(/[^\s"'&|;)]*)?`)
 
-// RewriteWorkspacePath rewrites /workspace references inside a command string to the local repository path
-// so cloud AI commands referencing /workspace work transparently on the user's local machine.
+// RewriteWorkspacePath rewrites /workspace references inside a command string to the local repository path.
 func RewriteWorkspacePath(command, localRoot string) string {
+	return RewriteWorkspacePathForMount(command, localRoot, "")
+}
+
+// RewriteWorkspacePathForMount rewrites /workspace/<mount> (or /workspace) references to localRoot.
+func RewriteWorkspacePathForMount(command, localRoot, mount string) string {
 	absRoot, err := filepath.Abs(localRoot)
 	if err != nil {
 		absRoot = localRoot
 	}
+	mountPrefix := "/workspace"
+	if m := strings.Trim(strings.TrimSpace(mount), "/"); m != "" {
+		mountPrefix = "/workspace/" + m
+	}
 	return workspaceTokenRe.ReplaceAllStringFunc(command, func(match string) string {
 		idx := strings.Index(match, "/workspace")
 		prefix := match[:idx]
-		suffix := match[idx+len("/workspace"):]
-		return prefix + absRoot + suffix
+		wsPart := match[idx:]
+		if wsPart == mountPrefix {
+			return prefix + absRoot
+		}
+		if strings.HasPrefix(wsPart, mountPrefix+"/") {
+			return prefix + absRoot + strings.TrimPrefix(wsPart, mountPrefix)
+		}
+		if mountPrefix == "/workspace" {
+			return prefix + absRoot + strings.TrimPrefix(wsPart, "/workspace")
+		}
+		return match
 	})
 }
 
-// ExecuteJob runs the full A+B pipeline:
-//   1. Pre-Exec Sync Barrier (pull latest cloud edits into local repo)
-//   2. Safety check + execute command locally in the mapped repo folder
-//   3. Post-Exec Sync Barrier (push command-generated files back to cloud /workspace)
+// ExecuteJob runs the full A+B pipeline for a single-mount engine.
 func ExecuteJob(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *ExecJob) ExecResult {
 	return ExecuteJobWithApproval(ctx, engine, syncMu, job, nil)
 }
 
 func ExecuteJobWithApproval(ctx context.Context, engine *Engine, syncMu *sync.Mutex, job *ExecJob, approvals *ApprovalManager) ExecResult {
+	mount := ""
+	if job != nil {
+		mount = job.Mount
+	}
+	return executeOnMount(ctx, &MountEngine{Mount: mount, Engine: engine, Mu: syncMu}, job, approvals)
+}
+
+func executeOnMount(ctx context.Context, target *MountEngine, job *ExecJob, approvals *ApprovalManager) ExecResult {
 	start := time.Now()
 	res := ExecResult{JobID: job.ID}
+
+	if target == nil || target.Engine == nil {
+		res.Stderr = "[super-agent] no local repository mapped for mount " + job.Mount + "\n"
+		res.ExitCode = 125
+		res.DurationMs = time.Since(start).Milliseconds()
+		return res
+	}
 
 	if err := ValidateCommand(job.Command); err != nil {
 		res.Stderr = "[super-agent guardrail] " + err.Error() + "\n"
@@ -115,19 +160,19 @@ func ExecuteJobWithApproval(ctx context.Context, engine *Engine, syncMu *sync.Mu
 		}
 	}
 
-	syncMu.Lock()
-	defer syncMu.Unlock()
+	target.Mu.Lock()
+	defer target.Mu.Unlock()
 
-	// 1. Pre-Exec Sync Barrier
-	if preStats, err := engine.SyncOnce(ctx); err != nil {
-		log.Printf("[exec] pre-sync warning job=%s err=%v", job.ID, err)
+	// 1. Pre-Exec Sync Barrier (scoped strictly to the target repository)
+	if preStats, err := target.Engine.SyncOnce(ctx); err != nil {
+		log.Printf("[exec] pre-sync warning job=%s mount=%q err=%v", job.ID, target.Mount, err)
 	} else {
 		res.PreSynced = preStats.Pushed + preStats.Pulled + preStats.Deleted
 	}
 
 	// 2. Execute command locally inside the mapped repo directory
-	workDir := ResolveWorkDir(engine.rootDir, job.Cwd)
-	rewritten := RewriteWorkspacePath(job.Command, engine.rootDir)
+	workDir := ResolveWorkDirForMount(target.Engine.rootDir, target.Mount, job.Cwd)
+	rewritten := RewriteWorkspacePathForMount(job.Command, target.Engine.rootDir, target.Mount)
 	timeout := time.Duration(job.TimeoutSec) * time.Second
 	if timeout <= 0 || timeout > 5*time.Minute {
 		timeout = 120 * time.Second
@@ -136,7 +181,7 @@ func ExecuteJobWithApproval(ctx context.Context, engine *Engine, syncMu *sync.Mu
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	log.Printf("[exec] ▶ running job=%s cwd=%s cmd=%q", job.ID, workDir, rewritten)
+	log.Printf("[exec] ▶ running job=%s mount=%q cwd=%s cmd=%q", job.ID, target.Mount, workDir, rewritten)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(execCtx, "cmd", "/C", rewritten)
@@ -170,15 +215,15 @@ func ExecuteJobWithApproval(ctx context.Context, engine *Engine, syncMu *sync.Mu
 	}
 
 	// 3. Post-Exec Sync Barrier
-	if postStats, syncErr := engine.SyncOnce(ctx); syncErr != nil {
-		log.Printf("[exec] post-sync warning job=%s err=%v", job.ID, syncErr)
+	if postStats, syncErr := target.Engine.SyncOnce(ctx); syncErr != nil {
+		log.Printf("[exec] post-sync warning job=%s mount=%q err=%v", job.ID, target.Mount, syncErr)
 	} else {
 		res.PostSynced = postStats.Pushed + postStats.Pulled + postStats.Deleted
 	}
 
 	res.DurationMs = time.Since(start).Milliseconds()
-	log.Printf("[exec] ✔ done job=%s exit=%d duration=%dms pre_sync=%d post_sync=%d",
-		job.ID, res.ExitCode, res.DurationMs, res.PreSynced, res.PostSynced)
+	log.Printf("[exec] ✔ done job=%s mount=%q exit=%d duration=%dms pre_sync=%d post_sync=%d",
+		job.ID, target.Mount, res.ExitCode, res.DurationMs, res.PreSynced, res.PostSynced)
 	return res
 }
 
@@ -188,12 +233,34 @@ func RunExecLoop(ctx context.Context, client *Client, engine *Engine, syncMu *sy
 }
 
 func RunExecLoopWithApproval(ctx context.Context, client *Client, engine *Engine, syncMu *sync.Mutex, approvals *ApprovalManager, onLockLost func()) {
-	log.Printf("[exec] local command bridge online — ready to execute cloud AI commands in %s", engine.rootDir)
+	me := &MountEngine{Mount: client.Mount(), Engine: engine, Mu: syncMu}
+	mounts := map[string]*MountEngine{}
+	if me.Mount != "" {
+		mounts[me.Mount] = me
+	}
+	RunMultiExecLoop(ctx, client, client.deviceName, mounts, me, approvals, onLockLost)
+}
+
+// RunMultiExecLoop polls jobs for a device managing multiple mounted repositories and routes each job to its repo.
+func RunMultiExecLoop(ctx context.Context, client *Client, deviceName string, mounts map[string]*MountEngine, defaultMount *MountEngine, approvals *ApprovalManager, onLockLost func()) {
+	mountNames := make([]string, 0, len(mounts))
+	for m := range mounts {
+		if m != "" {
+			mountNames = append(mountNames, m)
+		}
+	}
+	sort.Strings(mountNames)
+	if len(mountNames) > 0 {
+		log.Printf("[exec] local command bridge online — routing %d mounts: %s", len(mountNames), strings.Join(mountNames, ", "))
+	} else if defaultMount != nil && defaultMount.Engine != nil {
+		log.Printf("[exec] local command bridge online — ready to execute cloud AI commands in %s", defaultMount.Engine.rootDir)
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		job, err := client.PollExecJob(ctx, 25)
+		job, err := client.PollExecJobWithMounts(ctx, 25, deviceName, mountNames)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -216,7 +283,14 @@ func RunExecLoopWithApproval(ctx context.Context, client *Client, engine *Engine
 			continue
 		}
 
-		res := ExecuteJobWithApproval(ctx, engine, syncMu, job, approvals)
+		target := defaultMount
+		if job.Mount != "" {
+			if m, ok := mounts[job.Mount]; ok {
+				target = m
+			}
+		}
+
+		res := executeOnMount(ctx, target, job, approvals)
 		if err := client.SubmitExecResult(ctx, res); err != nil {
 			if errors.Is(err, ErrLockLost) {
 				if onLockLost != nil {

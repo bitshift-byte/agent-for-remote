@@ -33,6 +33,7 @@ apt-get install -y --no-install-recommends \
   tigervnc-standalone-server tigervnc-common tigervnc-tools novnc websockify \
   arc-theme papirus-icon-theme hicolor-icon-theme adwaita-icon-theme \
   librsvg2-common libgdk-pixbuf2.0-bin libgtk-3-bin \
+  gvfs gvfs-backends xdg-utils exo-utils libnss3 libgbm1 \
   fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
   locales fcitx5 fcitx5-pinyin fcitx5-chinese-addons fcitx5-frontend-gtk2 fcitx5-frontend-gtk3 fcitx5-frontend-qt5 fcitx5-config-qt im-config \
   gnome-keyring libsecret-1-0 libglib2.0-bin wmctrl x11-utils zenity \

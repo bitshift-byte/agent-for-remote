@@ -1,6 +1,6 @@
 #!/bin/sh
 rm -f "${HOME:-/home/ubuntu}/.config/google-chrome"/Singleton* 2>/dev/null || true
-CHROME_FLAGS="--start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync"
+CHROME_FLAGS="--no-sandbox --test-type --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run --no-default-browser-check --password-store=basic --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-sync"
 if command -v google-chrome-stable >/dev/null 2>&1; then
   exec google-chrome-stable $CHROME_FLAGS "$@"
 elif command -v chromium >/dev/null 2>&1; then

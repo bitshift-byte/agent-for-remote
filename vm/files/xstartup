@@ -2,6 +2,10 @@
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 export XDG_SESSION_TYPE=x11
+export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 700 "${XDG_RUNTIME_DIR}"
+
 export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh:en_US:en
 export LC_ALL=zh_CN.UTF-8
@@ -11,4 +15,4 @@ export XMODIFIERS=@im=fcitx
 export SDL_IM_MODULE=fcitx
 export INPUT_METHOD=fcitx
 
-exec dbus-launch --exit-with-session bash -lc 'fcitx5 -d --replace >/dev/null 2>&1 & exec startxfce4'
+exec dbus-launch --exit-with-session bash -lc 'fcitx5 -d --replace >/dev/null 2>&1 & exec startxfce4' >> "${HOME}/.vnc/xstartup.log" 2>&1

@@ -1,0 +1,15 @@
+[Unit]
+Description=Super-Agent noVNC Websockify Bridge
+After=super-agent-vnc.service
+Requires=super-agent-vnc.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/bin/websockify --web=/var/www/sa-desktop 0.0.0.0:3000 127.0.0.1:5901
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

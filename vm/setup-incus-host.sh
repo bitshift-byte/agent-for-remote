@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ubuntu 24.04 Host Setup for Super-Agent KVM Virtual Machine Runtime (Incus)
+# Ubuntu 22.04 / 24.04 Host Setup for Super-Agent KVM Virtual Machine Runtime (Incus)
 set -euo pipefail
 
 if [ ! -e /dev/kvm ]; then
@@ -7,9 +7,33 @@ if [ ! -e /dev/kvm ]; then
   exit 1
 fi
 
-echo "[1/3] Installing Incus and QEMU/KVM packages on Ubuntu 24.04..."
+echo "[1/3] Installing Incus and QEMU/KVM packages..."
 sudo apt-get update
-sudo apt-get install -y incus qemu-system-x86 ovmf virtiofsd
+if ! apt-cache show incus >/dev/null 2>&1; then
+  echo "Official Ubuntu repo lacks incus (e.g. Ubuntu 22.04); adding Zabbly stable Incus repo..."
+  sudo apt-get install -y curl gnupg
+  sudo mkdir -p /etc/apt/keyrings
+  curl -fsSL https://pkgs.zabbly.com/key.asc | sudo tee /etc/apt/keyrings/zabbly.asc >/dev/null
+  CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+  cat <<EOF | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources >/dev/null
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: ${CODENAME}
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/zabbly.asc
+EOF
+  sudo apt-get update
+fi
+
+sudo apt-get install -y incus qemu-system-x86 ovmf
+if ! command -v virtiofsd >/dev/null 2>&1; then
+  sudo apt-get install -y virtiofsd || true
+fi
+if [ ! -e /usr/bin/virtiofsd ] && [ -x /usr/libexec/virtiofsd ]; then
+  sudo ln -sf /usr/libexec/virtiofsd /usr/bin/virtiofsd
+fi
 
 echo "[2/3] Initializing Incus with default bridge (incusbr0) and dir storage pool..."
 if ! incus storage list --format csv | grep -q '^default,'; then

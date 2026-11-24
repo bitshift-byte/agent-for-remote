@@ -6,12 +6,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILDER_VM="sa-vm-builder"
 IMAGE_ALIAS="${INCUS_VM_IMAGE:-super-agent-vm-base}"
+BUILDER_CPU="${INCUS_BUILDER_CPU:-2}"
+BUILDER_MEM="${INCUS_BUILDER_MEM:-2048MiB}"
 
-echo "[1/5] Launching temporary Ubuntu 24.04 KVM builder VM (${BUILDER_VM})..."
+echo "[1/5] Launching temporary Ubuntu 24.04 KVM builder VM (${BUILDER_VM}, cpu=${BUILDER_CPU}, mem=${BUILDER_MEM})..."
 incus delete -f "${BUILDER_VM}" 2>/dev/null || true
 incus launch images:ubuntu/24.04/cloud "${BUILDER_VM}" --vm \
-  -c limits.cpu=4 \
-  -c limits.memory=4GiB
+  -c "limits.cpu=${BUILDER_CPU}" \
+  -c "limits.memory=${BUILDER_MEM}"
 
 echo "[2/5] Waiting for Incus VM agent to become ready..."
 for _ in $(seq 1 60); do
@@ -27,7 +29,8 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-  xfce4 xfce4-terminal xfce4-whiskermenu-plugin \
+  xfce4 xfce4-terminal xfce4-whiskermenu-plugin dbus-x11 \
+  tigervnc-standalone-server tigervnc-common novnc websockify \
   arc-theme papirus-icon-theme fonts-noto-cjk fonts-noto-color-emoji fonts-jetbrains-mono \
   fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 \
   gnome-keyring libsecret-1-0 libglib2.0-bin wmctrl x11-utils zenity \
@@ -47,8 +50,9 @@ fi
 
 # Create desktop user ubuntu if absent
 id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo ubuntu
-mkdir -p /workspace /etc/super-agent
-chown ubuntu:ubuntu /workspace
+mkdir -p /workspace /etc/super-agent /home/ubuntu/.vnc /var/www/sa-desktop
+ln -sfn /usr/share/novnc /var/www/sa-desktop/desktop
+chown -R ubuntu:ubuntu /workspace /home/ubuntu/.vnc
 '
 
 echo "[4/5] Pushing Super-Agent helper scripts into VM..."
@@ -98,6 +102,26 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 systemctl enable sa-vm-boot.service
+'
+
+# Push desktop streaming configs (:3000/desktop/ -> websockify -> loopback TigerVNC :1)
+incus file push "${REPO_ROOT}/vm/files/xstartup" "${BUILDER_VM}/home/ubuntu/.vnc/xstartup" --mode 0755
+incus file push "${REPO_ROOT}/vm/files/novnc-index.html" "${BUILDER_VM}/usr/share/novnc/index.html" --mode 0644
+incus file push "${REPO_ROOT}/vm/files/super-agent-vnc.service" "${BUILDER_VM}/etc/systemd/system/super-agent-vnc.service" --mode 0644
+incus file push "${REPO_ROOT}/vm/files/super-agent-desktop.service" "${BUILDER_VM}/etc/systemd/system/super-agent-desktop.service" --mode 0644
+
+incus exec "${BUILDER_VM}" -- env VNC_PASSWORD="${INCUS_VNC_PASSWORD:-}" bash -lc '
+set -euo pipefail
+if [ -z "${VNC_PASSWORD}" ]; then
+  VNC_PASSWORD="$(openssl rand -hex 4)"
+fi
+printf "%s\n" "${VNC_PASSWORD}" > /etc/super-agent/vnc.pass
+chmod 600 /etc/super-agent/vnc.pass
+printf "%s\n" "${VNC_PASSWORD}" | vncpasswd -f > /home/ubuntu/.vnc/passwd
+chown ubuntu:ubuntu /home/ubuntu/.vnc/xstartup /home/ubuntu/.vnc/passwd
+chmod 600 /home/ubuntu/.vnc/passwd
+systemctl daemon-reload
+systemctl enable super-agent-vnc.service super-agent-desktop.service
 apt-get clean
 '
 
@@ -108,4 +132,5 @@ incus publish "${BUILDER_VM}" --alias "${IMAGE_ALIAS}"
 incus delete "${BUILDER_VM}"
 
 echo "Golden KVM VM image '${IMAGE_ALIAS}' is ready!"
+echo "Desktop streaming listens on :3000/desktop/ (VNC password saved at /etc/super-agent/vnc.pass)."
 echo "Set DESKTOP_RUNTIME=incus in .env and start super-agent-gateway."
